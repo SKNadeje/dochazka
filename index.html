@@ -170,9 +170,11 @@ button{background:var(--ac)}button.g{background:var(--card)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 /* ===== NASTAVENÍ SUPABASE (vyplň svoje hodnoty, viz README) ===== */
-const SB_URL="https://vlabocwezmpwnxrwxihs.supabase.co";
-const SB_KEY="sb_publishable_H9egZ3Rrq5LYi02NxpvjCQ_xDXOQP4X";
+const SB_URL='https://YOUR-PROJECT.supabase.co';
+const SB_KEY='YOUR-ANON-PUBLIC-KEY';
 /* ================================================================ */
+/* Pauza na oběd: odečítá se od každé směny delší než LUNCH_FROM_H hodin. Změň zde. */
+const LUNCH_MIN=30,LUNCH_FROM_H=6;
 const CLOUD=/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(SB_URL)&&!/YOUR/.test(SB_KEY);
 let sb=null,user=null,snap={d:{},t:{},p:''},syncT=null,syncing=false;
 const uid=()=>crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16)});
@@ -307,7 +309,7 @@ function render(){
     let e=`<div class="nav"><b style="font-size:16px">${d.toLocaleDateString('cs-CZ',{weekday:'long',day:'numeric',month:'long'})}</b><button class="g" onclick="pick(null)">Zavřít</button></div>`;
     const dt=DT[sel]||'work';
     e+=`<div class="seg">${[['work','Práce'],['ho','HO'],['off','Volno']].map(q=>`<button class="${dt===q[0]?'':'g'}" onclick="setDT('${q[0]}')">${q[1]}</button>`).join('')}</div>${dt==='ho'?`<div class="mut" style="margin-top:6px">HO se počítá jako pracovní den: +${hh(prof.fund/5)} do hodin směn (pokud nezadáš vlastní směnu).</div>`:dt==='off'?'<div class="mut" style="margin-top:6px">Volno se odečte z fondu (platí Po–Pá).</div>':''}`;
-    e+=es.map(x=>{const mi=Math.round((x.e-x.s)/6e4),cl=x.t==='call';return `<div class="rl ${cl?'c':'w'}">${cl?'🚨 Zásah (začátek – konec)':'Směna (příchod – odchod)'} · ${mi>=60?Math.floor(mi/60)+' h ':''}${mi%60?mi%60+' min':''}</div><div class="r" data-id="${x.id}">${tp(x,'a')}${tp(x,'z')}<button class="x" onclick="del('${x.id}')">✕</button></div>${cl?`<div class="pre">${[30,60,90,120].map(m=>`<button class="g ch${mi===m?' on':''}" onclick="dur('${x.id}',${m})">${m} min</button>`).join('')}</div>`:''}`}).join('')||'<div class="mut" style="margin-top:6px">Zatím nic. Vyber směnu nebo zásah níže.</div>';
+    e+=es.map(x=>{const mi=Math.round((x.e-x.s)/6e4),cl=x.t==='call',mn=cl?mi:Math.round(wh(x)/6e4);return `<div class="rl ${cl?'c':'w'}">${cl?'🚨 Zásah (začátek – konec)':'Směna (příchod – odchod)'} · ${mn>=60?Math.floor(mn/60)+' h ':''}${mn%60?mn%60+' min':''}${!cl&&mn!==mi?' (bez pauzy '+LUNCH_MIN+' min)':''}</div><div class="r" data-id="${x.id}">${tp(x,'a')}${tp(x,'z')}<button class="x" onclick="del('${x.id}')">✕</button></div>${cl?`<div class="pre">${[30,60,90,120].map(m=>`<button class="g ch${mi===m?' on':''}" onclick="dur('${x.id}',${m})">${m} min</button>`).join('')}</div>`:''}`}).join('')||'<div class="mut" style="margin-top:6px">Zatím nic. Vyber směnu nebo zásah níže.</div>';
     es.forEach(x=>{if(dm[x.id])e+=`<div class="mut" style="margin-top:8px">Odpočinek před touto směnou: ${hh(dm[x.id].mx)} – ${dm[x.id].msg}</div>`});
     if(es.length)e+=delArm?`<div class="dlc">Smazat všechny záznamy tohoto dne?<div><button class="dd" onclick="delDay()">Ano, smazat</button><button class="g" onclick="delArm=false;render()">Zrušit</button></div></div>`:`<button class="dd o" onclick="delArm=true;render()">🗑 Smazat den</button>`;
     e+=`<div class="mut" style="margin-top:14px"><b>Směna</b> – klikni na předdefinovanou:</div><div class="pre">${SH.map(q=>{const [a,z]=q.split('-');return `<button class="g ch" onclick="add('work','${a}','${z}')">${a.replace(/^0/,'')}–${z.replace(/^0/,'')}</button>`}).join('')}<button class="g ch" onclick="add('work')">vlastní</button></div>`;
@@ -346,9 +348,10 @@ function isoWk(t){const d=new Date(t);d.setHours(0,0,0,0);d.setDate(d.getDate()+
 let delArm=false;
 function delDay(){D=D.filter(x=>key(x.s)!==sel);delArm=false;save();render()}
 document.addEventListener('keydown',e=>{if(e.key==='Delete'&&!/INPUT|SELECT|TEXTAREA/.test((document.activeElement||{}).tagName||'')&&sel&&D.some(x=>key(x.s)===sel)){delArm=true;render()}});
+const wh=x=>{const d=x.e-x.s;return x.t==='call'?d:Math.max(0,d-(d>=LUNCH_FROM_H*36e5?LUNCH_MIN*6e4:0))};
 function stats(){
   const y=cur.getFullYear(),m=cur.getMonth();let sh=0,ca=0;
-  D.forEach(x=>{const d=new Date(x.s);if(d.getFullYear()===y&&d.getMonth()===m){if(x.t==='call')ca+=x.e-x.s;else sh+=x.e-x.s}});
+  D.forEach(x=>{const d=new Date(x.s);if(d.getFullYear()===y&&d.getMonth()===m){if(x.t==='call')ca+=x.e-x.s;else sh+=wh(x)}});
   let wd=0;const n=new Date(y,m+1,0).getDate();for(let i=1;i<=n;i++){const g=new Date(y,m,i).getDay();if(g>0&&g<6)wd++}
   const wdays=new Set(D.filter(x=>x.t==='work').map(x=>key(x.s)));let off=0,ho=0;
   Object.keys(DT).forEach(k=>{const d=new Date(k+'T00:00:00');if(d.getFullYear()!==y||d.getMonth()!==m)return;const g=d.getDay();if(DT[k]==='off'&&g>0&&g<6)off++;if(DT[k]==='ho'&&!wdays.has(k))ho++});
@@ -357,7 +360,7 @@ function stats(){
 }
 function weekRows(){
   const y=cur.getFullYear(),m=cur.getMonth(),last=new Date(y,m+1,0).getTime(),r=[],nm=prof.fund/5*H,wdays=new Set(D.filter(x=>x.t==='work').map(x=>key(x.s)));
-  for(let w=mon(new Date(y,m,1));w<=last;){let sh=0,ca=0,off=0;D.forEach(x=>{if(mon(x.s)===w){if(x.t==='call')ca+=x.e-x.s;else sh+=x.e-x.s}});
+  for(let w=mon(new Date(y,m,1));w<=last;){let sh=0,ca=0,off=0;D.forEach(x=>{if(mon(x.s)===w){if(x.t==='call')ca+=x.e-x.s;else sh+=wh(x)}});
     Object.keys(DT).forEach(k=>{const d=new Date(k+'T00:00:00');if(mon(d)!==w)return;const g=d.getDay();if(DT[k]==='ho'&&!wdays.has(k))sh+=nm;if(DT[k]==='off'&&g>0&&g<6)off++});
     r.push({w,sh,ca,fund:prof.fund*H-off*nm});const n=new Date(w);n.setDate(n.getDate()+7);w=n.getTime()}
   return r;
@@ -392,12 +395,12 @@ async function exportPdf(){
     A.S.forEach(x=>{const d=new Date(x.s);if(d.getFullYear()===y&&d.getMonth()===m)(days[key(x.s)]=days[key(x.s)]||[]).push(x)});
     const TH='padding:7px 8px;background:#00893d;color:#fff;font-size:11px;font-weight:700;',TD='padding:7px 8px;border-bottom:1px solid #dfe7e2;vertical-align:middle;white-space:nowrap;';
     const rows=[...new Set([...Object.keys(days),...Object.keys(DT).filter(q=>q.startsWith(y+'-'+p(m+1)+'-'))])].sort().map(k=>{const es=days[k]||[],dt=DT[k],w=es.filter(x=>x.t==='work'),c=es.filter(x=>x.t==='call'),r=w.map(x=>dm[x.id]).filter(Boolean)[0];
-      const sh=w.reduce((a,x)=>a+x.e-x.s,0)+(dt==='ho'&&!w.length?prof.fund/5*H:0),ch=c.reduce((a,x)=>a+x.e-x.s,0),col=r?(r.c==='ok'?'#00893d':r.c==='wa'?'#b26a00':'#c62828'):'#1b2620';
+      const sh=w.reduce((a,x)=>a+wh(x),0)+(dt==='ho'&&!w.length?prof.fund/5*H:0),ch=c.reduce((a,x)=>a+x.e-x.s,0),col=r?(r.c==='ok'?'#00893d':r.c==='wa'?'#b26a00':'#c62828'):'#1b2620';
       return `<tr><td style="${TD}font-weight:700">${new Date(k+'T00:00:00').toLocaleDateString('cs-CZ',{weekday:'short',day:'numeric',month:'numeric'})}</td><td style="${TD}">${dt==='off'&&!w.length?'Volno':dt==='ho'&&!w.length?'HO':w.map(x=>hm(x.s)+'–'+hm(x.e)).join(', ')||'–'}</td><td style="${TD}text-align:right">${sh?hh(sh/H):''}</td><td style="${TD}white-space:normal;font-size:11px">${c.map(x=>hm(x.s)+'–'+hm(x.e)).join(', ')||'–'}</td><td style="${TD}text-align:right">${ch?hh(ch/H):''}</td><td style="${TD}color:${col};font-weight:600">${r?hh(r.mx)+' · '+r.msg.split(' (')[0]:''}</td></tr>`});
     const mn=cur.toLocaleDateString('cs-CZ',{month:'long',year:'numeric'});
     const head=`<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:13%"><col style="width:17%"><col style="width:14%"><col style="width:21%"><col style="width:14%"><col style="width:21%"></colgroup><tr><th style="${TH}text-align:left">Datum</th><th style="${TH}text-align:left">Směna</th><th style="${TH}text-align:right">Doba směny</th><th style="${TH}text-align:left">Zásah</th><th style="${TH}text-align:right">Doba zásahů</th><th style="${TH}text-align:left">Odpočinek před směnou</th></tr>`;
     const total=`<tr style="background:#eef5f0;font-weight:700"><td style="${TD}">Celkem</td><td style="${TD}"></td><td style="${TD}text-align:right">${hh(s.sh/H)}</td><td style="${TD}"></td><td style="${TD}text-align:right">${hh(s.ca/H)}</td><td style="${TD}"></td></tr>`;
-    const summary=`<div style="margin-top:18px;display:flex;gap:10px">${[['Směny',hh(s.sh/H)],['Doba zásahů',hh(s.ca/H)],['Fond ('+s.days+' prac. dní)',hh(s.fund/H)],['Směny − fond',sg(s.sh-s.fund)]].map(q=>`<div style="flex:1;border:1px solid #dfe7e2;border-top:3px solid ${G};border-radius:6px;padding:8px 10px"><div style="font-size:10px;color:#5f6f66">${q[0]}</div><div style="font-size:16px;font-weight:700;color:#006b30">${q[1]}</div></div>`).join('')}</div>${s.off?`<div style="font-size:11px;color:#5f6f66;margin-top:6px">Ve fondu odečteno ${s.off} dní svátků / volna.</div>`:''}<div style="margin:16px 0 6px;font-weight:700;color:#006b30">Přehled po týdnech</div>${repWeeks()}<div style="display:flex;justify-content:space-between;margin-top:54px"><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis zaměstnance</div><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis nadřízeného</div></div>`;
+    const summary=`<div style="margin-top:18px;display:flex;gap:10px">${[['Směny',hh(s.sh/H)],['Doba zásahů',hh(s.ca/H)],['Fond ('+s.days+' prac. dní)',hh(s.fund/H)],['Směny − fond',sg(s.sh-s.fund)]].map(q=>`<div style="flex:1;border:1px solid #dfe7e2;border-top:3px solid ${G};border-radius:6px;padding:8px 10px"><div style="font-size:10px;color:#5f6f66">${q[0]}</div><div style="font-size:16px;font-weight:700;color:#006b30">${q[1]}</div></div>`).join('')}</div>${s.off?`<div style="font-size:11px;color:#5f6f66;margin-top:6px">Ve fondu odečteno ${s.off} dní svátků / volna.</div>`:''}<div style="font-size:10px;color:#5f6f66;margin-top:6px">Doba směny je po odečtení pauzy na oběd (${LUNCH_MIN} min u směn nad ${LUNCH_FROM_H} h).</div><div style="margin:16px 0 6px;font-weight:700;color:#006b30">Přehled po týdnech</div>${repWeeks()}<div style="display:flex;justify-content:space-between;margin-top:54px"><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis zaměstnance</div><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis nadřízeného</div></div>`;
     const P1=19,PN=27,chunks=[];let i=0;chunks.push(rows.slice(0,P1));i=P1;while(i<rows.length){chunks.push(rows.slice(i,i+PN));i+=PN}
     const last=chunks[chunks.length-1],cap=chunks.length===1?P1:PN,sumOnLast=last.length<=cap-11;
     const pages=chunks.map((c,n)=>({tbl:head+c.join('')+(n===chunks.length-1?total:'')+'</table>',sum:n===chunks.length-1&&sumOnLast}));
