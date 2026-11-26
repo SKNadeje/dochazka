@@ -402,6 +402,10 @@ button.pill { border-radius:999px; }
 .d.y-vh:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-vh) 14%,var(--card)); }
 kbd { font:inherit; font-size:9px; opacity:.6; border:1px solid currentColor; border-radius:3px; padding:0 3px; margin-left:2px; }
 
+/* 17) Příchod zvlášť */
+.arrrow { display:flex; gap:8px; margin:6px 0 10px; } .arrrow .dti { flex:0 0 96px; text-align:center; } .arrrow button { flex:1; }
+.ent.open { border-style:dashed; }
+
 </style>
 </head>
 <body>
@@ -565,6 +569,9 @@ function parseTime(v) {
 }
 
 // Začátek a konec záznamu v ms z "HH:MM" a dne. Odchod <= příchod = končí další den.
+// Směna jen s příchodem (odchod ještě není zadaný) se ukládá s koncem o 1 ms později; do hodin a pravidel se nepočítá.
+const isOpen = x => x.t === 'work' && x.e - x.s <= 1;
+
 function makeTimes(dayKey, from, to) {
   const [fh, fm] = from.split(':'), [th, tm] = to.split(':');
   const s = dayStart(dayKey); s.setHours(+fh, +fm, 0, 0);
@@ -744,7 +751,7 @@ function netMs(x) {
 // součty po dnech: { '2026-11-25': { sh, ca, work } }
 function perDay() {
   const m = {};
-  D.forEach(x => {
+  D.filter(x => !isOpen(x)).forEach(x => {
     const k = key(x.s), r = m[k] || (m[k] = { sh: 0, ca: 0, work: false });
     if (x.t === 'call') r.ca += x.e - x.s; else { r.sh += netMs(x); r.work = true; }
   });
@@ -817,7 +824,7 @@ function yearAllow(y, f) { const v = (YEARS[y] || {})[f]; return v !== undefined
 // měsíc má záznamy (aspoň jedna směna)?
 function hasData(y, m) {
   const a = new Date(y, m, 1).getTime(), b = new Date(y, m + 1, 1).getTime();
-  return D.some(x => x.t === 'work' && x.s >= a && x.s < b);
+  return D.some(x => x.t === 'work' && !isOpen(x) && x.s >= a && x.s < b);
 }
 // Automatický zůstatek do měsíce (y,m): rozdíl minulého měsíce + jeho zůstatek (ručně zadaný, jinak řetězově dál). V minutách; null = nic k přenosu.
 function carryIn(y, m, depth = 0) {
@@ -1034,8 +1041,9 @@ let callStart = CONFIG.callDefaultStart;    // zvolený začátek zásahu
 let refocus = null;                         // které políčko vrátit zpět do fokusu
 
 function render() {
-  const all = analyze(D);                                                   // všechno (pro kalendář a editor)
-  const counted = CONFIG.countFutureDays ? D : D.filter(x => key(x.s) <= todayKey());
+  const dClosed = D.filter(x => !isOpen(x));
+  const all = analyze(dClosed);                                                   // všechno (pro kalendář a editor)
+  const counted = CONFIG.countFutureDays ? dClosed : dClosed.filter(x => key(x.s) <= todayKey());
   const shown = analyze(counted);                                           // jen dny, které už byly (pro karty)
   const dm = {}, wm = {};
   all.daily.forEach(r => dm[r.id] = r);                                     // denní odpočinek podle začátku směny
@@ -1061,7 +1069,7 @@ function renderCalendar(A, dm, wm) {
     const d = new Date(d0); d.setDate(d0.getDate() + i);
     if (i >= 35 && d.getMonth() !== m) break;
     if (i % 7 === 0) html += `<div class="kv">KV<br>${isoWeek(d)}</div>`;
-    const k = key(d), es = A.S.filter(x => key(x.s) === k);
+    const k = key(d), es = D.filter(x => key(x.s) === k).sort((p, q) => p.s - q.s);
     const w = es.find(x => x.t === 'work' && dm[x.id]);
     const cls = ['d', d.getMonth() !== m && 'o', d.getDay() % 6 === 0 && 'we', k === today && 't', k === sel && 's', wm[k] && 'k-' + wm[k], dkind(k) && 'y-' + dkind(k)].filter(Boolean).join(' ');
     const dot = w ? `<u class="x-${dm[w.id].c}"></u>` : '';
@@ -1069,7 +1077,7 @@ function renderCalendar(A, dm, wm) {
     const dk = dkind(k);
     const tag = DT[k] ? `<span class="tag y-${DT[k]}">${TAGS[DT[k]]}</span>` : dk === 'hol' ? `<span class="tag y-hol" title="${esc(hn)}">svátek</span>` : '';
     const ni = NOTES[k] ? `<span class="ni" title="${esc(NOTES[k])}">✎</span>` : '';
-    const chips = es.map(x => `<span class="chip ${x.t === 'call' ? 'c' : 'w'}">${x.t === 'call' ? '🚨' : ''}${shortTime(x.s)}–${shortTime(x.e)}</span>`).join('');
+    const chips = es.map(x => `<span class="chip ${x.t === 'call' ? 'c' : 'w'}">${x.t === 'call' ? '🚨' : ''}${shortTime(x.s)}–${isOpen(x) ? '…' : shortTime(x.e)}</span>`).join('');
     html += `<div class="${cls}" onclick="pickDay('${k}')"><i>${d.getDate()}</i>${dot}${ni}<div class="mk">${tag}${chips}</div></div>`;
   }
   $('cal').innerHTML = html;
@@ -1090,6 +1098,16 @@ function timeCtl({ val, cls, onch, minus, plus }) {
 
 function entryHtml(x) {
   const call = x.t === 'call', st = CONFIG.stepMinutes;
+  if (isOpen(x)) {                                   // jen příchod, čeká se na odchod
+    const ctlA = timeCtl({ val: hm(x.s), cls: 'a', onch: `updateEntry('${x.id}',this.closest('.r'))`, minus: `nudge('${x.id}','a',-${st})`, plus: `nudge('${x.id}','a',${st})` });
+    const zin = TOUCH
+      ? `<input type="time" class="z" value="" onchange="updateEntry('${x.id}',this.closest('.r'))">`
+      : `<input type="text" class="z" inputmode="numeric" maxlength="5" value="" placeholder="odchod" onchange="updateEntry('${x.id}',this.closest('.r'))" onkeydown="timeKey(event)" onfocus="this.select()">`;
+    const now = Date.now(), plan = x.s + 8 * H;
+    return `<div class="ent work open"><div class="ent-h"><span>Směna</span><span class="mut">čeká na odchod</span><span class="sp"></span><button class="x" onclick="removeEntry('${x.id}')">✕</button></div>
+      <div class="r" data-id="${x.id}">${ctlA}<span class="arr">→</span><div class="tc">${zin}</div></div>
+      <div class="pills">${key(x.s) === todayKey() && now > x.s ? `<button class="g pill" onclick="closeShift('${x.id}',${now - now % MIN})">Odchod teď ${hm(now)}</button>` : ''}<button class="g pill" onclick="closeShift('${x.id}',${plan})">+8 h → ${hm(plan)}</button></div></div>`;
+  }
   const gross = Math.round((x.e - x.s) / MIN), net = Math.round(netMs(x) / MIN);
   const dur = (net >= 60 ? Math.floor(net / 60) + ' h ' : '') + (net % 60 ? net % 60 + ' min' : '');
   const note = !call && net !== gross ? ' · bez pauzy ' + CONFIG.lunchMin + ' min' : '';
@@ -1110,7 +1128,7 @@ function renderEditor(A, dm, lastId) {
   document.body.classList.toggle('lock', sheet);
   if (!sel) { ed.innerHTML = '<p class="mut">Klepni na den v kalendáři.</p>'; return; }
 
-  const es = A.S.filter(x => key(x.s) === sel), st = CONFIG.stepMinutes;
+  const es = D.filter(x => key(x.s) === sel).sort((p, q) => p.s - q.s), st = CONFIG.stepMinutes;
   const type = DT[sel] || 'work';
   const title = dayStart(sel).toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' });
   let h = `<div class="grab"></div><div class="nav"><b>${title}</b><button class="g" onclick="closeDay()">Hotovo</button></div>`;
@@ -1148,10 +1166,11 @@ function renderEditor(A, dm, lastId) {
   h += `<div class="sec">Poznámka</div><textarea id="nt" class="nt" maxlength="300" rows="2" placeholder="Např. školení, výměna směny…" onchange="setNote(this.value)">${esc(NOTES[sel] || '')}</textarea>`;
 
   // přidat směnu
-  h += `<div class="sec">Přidat směnu</div><div class="pills">${CONFIG.shiftPresets.map(p => { const [a, z] = p.split('-'); return `<button class="g pill" onclick="addShift('${a}','${z}')">${a.replace(/^0/, '')}–${z.replace(/^0/, '')}</button>`; }).join('')}<button class="g pill" onclick="addShift()">jiná</button></div>`;
+  h += `<div class="sec">Příchod (odchod doplníš později)</div><div class="arrrow"><input id="ci" class="dti" ${TOUCH ? 'type="time"' : 'type="text" inputmode="numeric" maxlength="5" onkeydown="timeKey(event)" onfocus="this.select()"'} value="${sel === todayKey() ? hm(Date.now()) : CONFIG.shiftPresets[0].split('-')[0]}"><button onclick="addArrival()">Zapsat příchod</button></div>
+  <div class="sec">Nebo celá směna</div><div class="pills">${CONFIG.shiftPresets.map(p => { const [a, z] = p.split('-'); return `<button class="g pill" onclick="addShift('${a}','${z}')">${a.replace(/^0/, '')}–${z.replace(/^0/, '')}</button>`; }).join('')}<button class="g pill" onclick="addShift()">jiná</button></div>`;
 
   // přidat zásah
-  const lastWork = es.filter(x => x.t === 'work').pop();
+  const lastWork = es.filter(x => x.t === 'work' && !isOpen(x)).pop();
   h += `<div class="sec">Pohotovostní zásah</div><div class="lbl">Začátek</div>`
     + timeCtl({ val: callStart, cls: 'cs', onch: 'setCallStart(this.value)', minus: `stepCallStart(-${st})`, plus: `stepCallStart(${st})` })
     + (lastWork ? `<div class="pills"><button class="g pill" onclick="setCallStart('${hm(lastWork.e)}')">= konec směny ${hm(lastWork.e)}</button></div>` : '')
@@ -1182,16 +1201,29 @@ function stepCallStart(delta) {
   const [h, m] = callStart.split(':').map(Number), t = (h * 60 + m + delta + 1440) % 1440;
   callStart = pad(Math.floor(t / 60)) + ':' + pad(t % 60); render();
 }
+function addArrival() {                         // jen příchod; odchod se doplní později
+  const a = parseTime($('ci').value); if (!a) { render(); return; }
+  const d = dayStart(sel); d.setHours(...a.split(':').map(Number).slice(0, 2), 0, 0);
+  D.push({ id: uid(), s: d.getTime(), e: d.getTime() + 1, t: 'work' }); save(); render();
+}
+function closeShift(id, ms) {                     // odchod zadán -> otevřená směna se uzavře a vše se přepočítá
+  const x = D.find(q => q.id === id); if (!x || ms <= x.s) return;
+  x.e = ms; save(); render();
+}
 function updateEntry(id, row) {               // čas přepsaný ručně
   const x = D.find(q => q.id === id); if (!x) return;
-  const a = parseTime(row.querySelector('.a').value), z = parseTime(row.querySelector('.z').value);
+  const a = parseTime(row.querySelector('.a').value), zr = row.querySelector('.z').value.trim(), z = parseTime(zr);
+  if (a && !zr && isOpen(x)) {                    // upraven jen příchod u otevřené směny
+    const d = dayStart(key(x.s)); d.setHours(...a.split(':').map(Number).slice(0, 2), 0, 0);
+    x.s = d.getTime(); x.e = x.s + 1; save(); render(); return;
+  }
   if (!a || !z) { render(); return; }
   [x.s, x.e] = makeTimes(key(x.s), a, z); save(); render();
 }
 function nudge(id, which, delta) {            // tlačítka − / +  (u zásahu posun začátku posune celý zásah)
   const x = D.find(q => q.id === id); if (!x) return;
   const d = delta * MIN; let s = x.s, e = x.e;
-  if (which === 'a') { s += d; if (x.t === 'call') e += d; } else e += d;
+  if (which === 'a') { s += d; if (x.t === 'call' || isOpen(x)) e += d; } else e += d;
   if (e <= s || key(s) !== key(x.s)) return;  // nesmí přeskočit do jiného dne ani být záporný
   x.s = s; x.e = e; save(); render();
 }
@@ -1302,13 +1334,6 @@ function setYear(f, v) {
 }
 function setNote(v) { v = v.trim().slice(0, 300); if (v) NOTES[sel] = v; else delete NOTES[sel]; save(); render(); }
 
-function weeksHtml() {
-  const rows = weekRows().filter(x => !x.future).map(x => {
-    const d = x.diff;
-    return `<tr><td><b>KV ${isoWeek(x.w)}</b> <span class="mut">${fmtDate(x.w)}</span></td><td>${fmtMs(x.sh + x.lv)}</td><td>${fmtMs(x.ca)}</td><td>${fmtMs(x.fund)}</td><td class="${d < 0 ? 'neg' : 'pos'}">${signedMs(d)}</td></tr>`;
-  }).join('');
-  return `<table class="wt"><tr><th>KV</th><th>Směny</th><th>Zásahy</th><th>Fond</th><th>±</th></tr>${rows}</table>`;
-}
 
 // Dovolená a sick day za kalendářní rok zobrazeného měsíce (nárok jde upravit, stejně jako zůstatek)
 function yearHtml() {
@@ -1338,8 +1363,7 @@ function renderSummary() {
     ${row('Celkem se zůstatkem k ' + asOf, signedMs(s.total), 'total ' + (s.total < 0 ? 'neg' : 'pos'))}
     ${row('Doba zásahů (zvlášť)', fmtMs(s.ca))}
     ${yearHtml()}
-    <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · ${daysLine(s)}</div>
-    ${weeksHtml()}</div>`;
+    <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · ${daysLine(s)}</div></div>`;
 }
 
 /* =====================================================================
@@ -1380,7 +1404,7 @@ async function exportPdf() {
   const btn = $('pdf'), oldLabel = btn.textContent; btn.textContent = 'Vytvářím…';
   try {
     if (!window.html2canvas || !window.jspdf) throw new Error('knihovny pro PDF se nenačetly');
-    const A = analyze(D), dm = {}; A.daily.forEach(r => dm[r.id] = r);
+    const A = analyze(D.filter(x => !isOpen(x))), dm = {}; A.daily.forEach(r => dm[r.id] = r);
     const y = cur.getFullYear(), m = cur.getMonth(), s = monthStats(), today = todayKey();
     const monthName = cur.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
     const counted = k => CONFIG.countFutureDays || k < today;        // jen celé dny (do včerejška)
