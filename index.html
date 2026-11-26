@@ -185,6 +185,7 @@ button.lnk2 { background:none; color:var(--ac-tx); border:0; font-weight:500; fo
 .sr.total span { font-weight:700; } .sr.total b { font-size:18px; }
 .bal { width:92px; padding:5px 8px; text-align:right; font:inherit; font-weight:700; color:var(--tx); background:var(--cell); border:1px solid var(--bd); border-radius:8px; }
 .bal:focus { outline:2px solid var(--ac); border-color:var(--ac); }
+.asof { margin:4px 0 2px; }
 .hint { margin:-2px 0 4px; text-align:right; }
 button.lnk { background:none; border:0; padding:0 0 0 6px; color:var(--ac-tx); font-size:12px; text-decoration:underline; }
 
@@ -329,7 +330,7 @@ const CONFIG = {
   defaultWeeklyFund: 37.5,          // výchozí týdenní fond (h)
   lunchMin: 30,                     // pauza na oběd (minuty)
   lunchFromHours: 6,                // pauza se odečte u směn delších než X hodin
-  countFutureDays: false,           // false = dny, které ještě nebyly, se nepočítají do hodin
+  countFutureDays: false,           // false = počítají se jen celé dny do včerejška (dnešek ani budoucnost ne)
 
   // --- Rychlé přidávání ---
   shiftPresets: ["06:00-14:00", "06:00-14:30", "06:30-14:30", "06:30-15:00"],
@@ -555,7 +556,7 @@ function calcRange(from, to, cut = true) {
   let sh = 0, ca = 0, wd = 0, off = 0, ho = 0;
   for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
     const k = key(d);
-    if (cut && !CONFIG.countFutureDays && k > today) break;
+    if (cut && !CONFIG.countFutureDays && k >= today) break;   // počítá se jen do včerejška (poslední celý den)
     const g = d.getDay(), weekday = g > 0 && g < 6;
     const day = map[k] || { sh: 0, ca: 0, work: false };
     sh += day.sh; ca += day.ca;
@@ -574,6 +575,10 @@ function monthStats() {
   const a = new Date(y, m, 1), b = new Date(y, m + 1, 0);
   const r = calcRange(a, b);
   r.fundFull = calcRange(a, b, false).fund;
+  const y1 = new Date(); y1.setHours(0, 0, 0, 0); y1.setDate(y1.getDate() - 1);          // včerejšek
+  const last = CONFIG.countFutureDays ? b : new Date(Math.min(b.getTime(), y1.getTime()));
+  r.asOf = last >= a ? last : null;                  // datum, ke kterému rozdíl platí (poslední celý den)
+  r.balDate = new Date(y, m, 0);                     // zůstatek z min. měsíce platí k poslednímu dni min. měsíce
   r.key = monthKey(a);
   r.bal = (BAL[r.key] || 0) * MIN;                 // zůstatek z minulého měsíce
   r.total = r.sh - r.fund + r.bal;                 // rozdíl za měsíc + zůstatek
@@ -591,7 +596,7 @@ function weekRows() {
     const to = new Date(w); to.setDate(to.getDate() + 6);
     const r = calcRange(w, to);
     r.w = w.getTime();
-    r.future = !CONFIG.countFutureDays && key(w) > todayKey();
+    r.future = !CONFIG.countFutureDays && key(w) >= todayKey();
     rows.push(r);
     w.setDate(w.getDate() + 7);
   }
@@ -992,14 +997,16 @@ function weeksHtml() {
 function renderSummary() {
   const s = monthStats(), diff = s.sh - s.fund;
   const label = cur.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
+  const asOf = s.asOf ? fmtDate(s.asOf) : '—';
   const row = (name, val, cls = '') => `<div class="sr ${cls}"><span>${name}</span><b>${val}</b></div>`;
   const hint = s.prevHas ? `<div class="mut hint">Dle záznamů minulý měsíc: <b>${signedMs(s.prevDiff)}</b> <button class="lnk" onclick="useAutoBalance()">použít</button></div>` : '';
   $('sm').innerHTML = `<div class="card"><div class="tt">Hodiny a fond · ${label}</div>
+    <div class="mut asof">Stav k poslednímu celému dni: <b>${asOf}</b> (dnešek se nepočítá)</div>
     ${row('Směny', fmtMs(s.sh))}
-    ${row((CONFIG.countFutureDays ? 'Fond' : 'Fond k dnešku') + ' (' + s.days + ' dní)', fmtMs(s.fund))}
-    ${row('Rozdíl za měsíc', signedMs(diff), diff < 0 ? 'neg' : 'pos')}
-    <div class="sr"><span>Zůstatek z min. měsíce</span><input class="bal" value="${balText(s.bal / MIN)}" onchange="setBalance(this.value)" onfocus="this.select()" aria-label="Zůstatek z minulého měsíce"></div>${hint}
-    ${row('Celkem se zůstatkem', signedMs(s.total), 'total ' + (s.total < 0 ? 'neg' : 'pos'))}
+    ${row('Fond k ' + asOf + ' (' + s.days + ' dní)', fmtMs(s.fund))}
+    ${row('Rozdíl za měsíc k ' + asOf, signedMs(diff), diff < 0 ? 'neg' : 'pos')}
+    <div class="sr"><span>Zůstatek z min. měsíce <small class="mut">(k ${fmtDate(s.balDate)})</small></span><input class="bal" value="${balText(s.bal / MIN)}" onchange="setBalance(this.value)" onfocus="this.select()" aria-label="Zůstatek z minulého měsíce"></div>${hint}
+    ${row('Celkem se zůstatkem k ' + asOf, signedMs(s.total), 'total ' + (s.total < 0 ? 'neg' : 'pos'))}
     ${row('Doba zásahů (zvlášť)', fmtMs(s.ca))}
     <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · Volno: ${s.off} d · HO: ${s.ho} d</div>
     ${weeksHtml()}</div>`;
@@ -1047,7 +1054,8 @@ async function exportPdf() {
     const A = analyze(D), dm = {}; A.daily.forEach(r => dm[r.id] = r);
     const y = cur.getFullYear(), m = cur.getMonth(), s = monthStats(), today = todayKey();
     const monthName = cur.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
-    const counted = k => CONFIG.countFutureDays || k <= today;
+    const counted = k => CONFIG.countFutureDays || k < today;        // jen celé dny (do včerejška)
+    const asOf = s.asOf ? fmtDate(s.asOf) : '—';
 
     /* řádky tabulky: dny s záznamem nebo s HO / volnem */
     const byDay = {};
@@ -1076,9 +1084,9 @@ async function exportPdf() {
     const totalRow = `<tr style="background:#eef5f0;font-weight:700"><td style="${TD}">Celkem</td><td style="${TD}"></td><td style="${TD}text-align:right">${fmtMs(s.sh)}</td><td style="${TD}"></td><td style="${TD}text-align:right">${fmtMs(s.ca)}</td><td style="${TD}"></td></tr>`;
 
     /* shrnutí, týdny, podpisy */
-    const tiles = [['Směny', fmtMs(s.sh)], ['Doba zásahů', fmtMs(s.ca)], [(CONFIG.countFutureDays ? 'Fond' : 'Fond k dnešku') + ' (' + s.days + ' dní)', fmtMs(s.fund)], ['Směny − fond', signedMs(s.sh - s.fund)]];
+    const tiles = [['Směny', fmtMs(s.sh)], ['Doba zásahů', fmtMs(s.ca)], ['Fond k ' + asOf + ' (' + s.days + ' dní)', fmtMs(s.fund)], ['Směny − fond k ' + asOf, signedMs(s.sh - s.fund)]];
     const summary = `<div style="margin-top:18px;display:flex;gap:10px">${tiles.map(q => `<div style="flex:1;border:1px solid #dfe7e2;border-top:3px solid ${GREEN};border-radius:6px;padding:8px 10px"><div style="font-size:10px;color:#5f6f66">${q[0]}</div><div style="font-size:16px;font-weight:700;color:#006b30">${q[1]}</div></div>`).join('')}</div>
-      <div style="margin-top:8px;font-size:12px"><b>Zůstatek z min. měsíce:</b> ${balText(s.bal / MIN)} &nbsp;|&nbsp; <b>Celkem se zůstatkem:</b> ${signedMs(s.total)}</div>
+      <div style="margin-top:8px;font-size:12px"><b>Zůstatek z min. měsíce (k ${fmtDate(s.balDate)}):</b> ${balText(s.bal / MIN)} &nbsp;|&nbsp; <b>Celkem se zůstatkem k ${asOf}:</b> ${signedMs(s.total)}</div>
       <div style="font-size:10px;color:#5f6f66;margin-top:6px">Fond za celý měsíc: ${fmtMs(s.fundFull)}${s.off ? ' · volno/svátky: ' + s.off + ' d' : ''}${s.ho ? ' · HO: ' + s.ho + ' d' : ''}. Doba směny je po odečtení pauzy na oběd (${CONFIG.lunchMin} min u směn nad ${CONFIG.lunchFromHours} h).</div>
       <div style="margin:16px 0 6px;font-weight:700;color:#006b30">Přehled po týdnech</div>${pdfWeeksTable()}
       <div style="display:flex;justify-content:space-between;margin-top:54px"><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis zaměstnance</div><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis nadřízeného</div></div>`;
