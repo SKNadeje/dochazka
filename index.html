@@ -786,6 +786,13 @@ function dayInfo(k, hasWork) {
   return r;
 }
 
+// Počítá se den do hodin? Dny do včerejška ano; dnešek až když má uzavřenou směnu (odchod zadán); budoucnost ne.
+function dayCounted(k) {
+  if (CONFIG.countFutureDays) return true;
+  const t = todayKey();
+  return k < t || (k === t && D.some(x => x.t === 'work' && !isOpen(x) && key(x.s) === k));
+}
+
 // Hodiny a fond za období od–do (Date, včetně). cut=true: dny po dnešku se nepočítají.
 function calcRange(from, to, cut = true) {
   const map = perDay(), today = todayKey(), norm = prof.fund / 5 * H;
@@ -793,7 +800,7 @@ function calcRange(from, to, cut = true) {
   const c = { off: 0, vac: 0, vh: 0, sd: 0, blood: 0, hol: 0, doc: 0, sick: 0, care: 0, ho: 0 };
   for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
     const k = key(d);
-    if (cut && !CONFIG.countFutureDays && k >= today) break;   // počítá se jen do včerejška (poslední celý den)
+    if (cut && !dayCounted(k)) break;   // počítá se do včerejška; dnešek až po zadání odchodu
     const g = d.getDay(), weekday = g > 0 && g < 6;
     const day = map[k] || { sh: 0, ca: 0, work: false };
     sh += day.sh; ca += day.ca;
@@ -844,7 +851,8 @@ function monthStats() {
   const r = calcRange(a, b);
   r.fundFull = calcRange(a, b, false).fund;
   const y1 = new Date(); y1.setHours(0, 0, 0, 0); y1.setDate(y1.getDate() - 1);          // včerejšek
-  const last = CONFIG.countFutureDays ? b : new Date(Math.min(b.getTime(), y1.getTime()));
+  const t0 = dayStart(todayKey()), upTo = dayCounted(todayKey()) ? t0 : y1;      // poslední započtený den
+  const last = CONFIG.countFutureDays ? b : new Date(Math.min(b.getTime(), upTo.getTime()));
   r.asOf = last >= a ? last : null;                  // datum, ke kterému rozdíl platí (poslední celý den)
   r.balDate = new Date(y, m, 0);                     // zůstatek z min. měsíce platí k poslednímu dni min. měsíce
   r.key = monthKey(a);
@@ -1359,7 +1367,7 @@ function renderSummary() {
     ? (s.autoBal !== null && s.autoBal * MIN !== s.bal ? `<div class="mut hint">Automaticky z min. měsíce: <b>${signedMs(s.autoBal * MIN)}</b> <button class="lnk" onclick="useAutoBalance()">použít</button></div>` : '')
     : (s.autoBal !== null ? `<div class="mut hint">Zůstatek přenesen automaticky z minulého měsíce (přepiš ručně, když nesedí).</div>` : '');
   $('sm').innerHTML = `<div class="card"><div class="tt">Hodiny a fond · ${label}</div>
-    <div class="mut asof">Stav k poslednímu celému dni: <b>${asOf}</b> (dnešek se nepočítá)</div>
+    <div class="mut asof">Stav k poslednímu celému dni: <b>${asOf}</b> (${dayCounted(todayKey()) ? 'dnešek je započten' : 'dnešek se započte po zadání odchodu'})</div>
     ${row('Směny', fmtMs(s.sh))}
     ${s.lv ? row('Volno / dovolená / svátky / lékař (započteno)', '+' + fmtMs(s.lv)) : ''}
     ${row('Fond k ' + asOf + ' (' + s.days + ' dní)', fmtMs(s.fund))}
@@ -1413,7 +1421,7 @@ async function exportPdf() {
     const A = analyze(D.filter(x => !isOpen(x))), dm = {}; A.daily.forEach(r => dm[r.id] = r);
     const y = cur.getFullYear(), m = cur.getMonth(), s = monthStats(), today = todayKey();
     const monthName = cur.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
-    const counted = k => CONFIG.countFutureDays || k < today;        // jen celé dny (do včerejška)
+    const counted = dayCounted;        // dny do včerejška (dnešek až po zadání odchodu)
     const asOf = s.asOf ? fmtDate(s.asOf) : '—';
 
     /* řádky tabulky: dny s záznamem nebo s HO / volnem */
