@@ -372,15 +372,30 @@ button.pill { border-radius:999px; }
 .docrow { display:flex; align-items:center; gap:8px; margin:6px 0 8px; }
 .dti { flex:1; font:inherit; padding:9px 10px; border:1px solid var(--bd); border-radius:10px; background:var(--card); color:var(--tx); }
 
+/* 14) Barvy typů dnů v kalendáři */
+:root { --y-ho:#5b6572; --y-off:#2f7dd1; --y-vac:#0f9bb0; --y-blood:#d23b4b; --y-doc:#8a52c9; --y-sick:#e07b1a; --y-care:#d6558f; --y-hol:#b08d4a; }
+.tag.y-ho,.tag.y-off,.tag.y-vac,.tag.y-blood,.tag.y-doc,.tag.y-sick,.tag.y-care,.tag.y-hol { color:#fff; }
+.tag.y-ho { background:var(--y-ho); } .tag.y-off { background:var(--y-off); } .tag.y-vac { background:var(--y-vac); }
+.tag.y-blood { background:var(--y-blood); } .tag.y-doc { background:var(--y-doc); } .tag.y-sick { background:var(--y-sick); }
+.tag.y-care { background:var(--y-care); } .tag.y-hol { background:var(--y-hol); }
+.d.y-ho:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-ho) 14%,var(--card)); }
+.d.y-off:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-off) 14%,var(--card)); }
+.d.y-vac:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-vac) 16%,var(--card)); }
+.d.y-blood:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-blood) 14%,var(--card)); }
+.d.y-doc:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-doc) 14%,var(--card)); }
+.d.y-sick:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-sick) 17%,var(--card)); }
+.d.y-care:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-care) 15%,var(--card)); }
+.d.y-hol:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-hol) 20%,var(--card)); }
+
 </style>
 </head>
 <body>
 
 <!-- ===== HLAVIČKA: profil, přepínač režimu, export ===== -->
 <header>
-  <div class="brand"><b>Schaeffler</b> <span>motion technologies</span><small>Docházka a hlídání odpočinku</small></div>
+  <div class="brand"><b>Schaeffler</b> <span>Motion Technologies</span><small>Docházka a hlídání odpočinku</small></div>
   <div class="prof">
-    <label>Jméno<input id="pn" placeholder="Jméno a příjmení"></label>
+    <label>Zaměstnanec<input id="pn" placeholder="Jméno a příjmení"></label>
     <label>Týdenní fond (h)<input id="pf" type="number" step="0.5" min="0"></label>
     <span id="who" class="who"></span><span id="sst" class="who"></span>
     <button id="lo" class="g" hidden onclick="sb.auth.signOut()">Odhlásit</button>
@@ -1012,10 +1027,11 @@ function renderCalendar(A, dm, wm) {
     if (i % 7 === 0) html += `<div class="kv">KV<br>${isoWeek(d)}</div>`;
     const k = key(d), es = A.S.filter(x => key(x.s) === k);
     const w = es.find(x => x.t === 'work' && dm[x.id]);
-    const cls = ['d', d.getMonth() !== m && 'o', d.getDay() % 6 === 0 && 'we', k === today && 't', k === sel && 's', wm[k] && 'k-' + wm[k]].filter(Boolean).join(' ');
+    const cls = ['d', d.getMonth() !== m && 'o', d.getDay() % 6 === 0 && 'we', k === today && 't', k === sel && 's', wm[k] && 'k-' + wm[k], dkind(k) && 'y-' + dkind(k)].filter(Boolean).join(' ');
     const dot = w ? `<u class="x-${dm[w.id].c}"></u>` : '';
     const hn = holidayName(k), g0 = d.getDay();
-    const tag = DT[k] ? `<span class="tag ${DT[k] === 'ho' ? 'ho' : 'vo'}">${TAGS[DT[k]]}</span>` : (hn && g0 > 0 && g0 < 6) ? `<span class="tag vo" title="${esc(hn)}">svátek</span>` : '';
+    const dk = dkind(k);
+    const tag = DT[k] ? `<span class="tag y-${DT[k]}">${TAGS[DT[k]]}</span>` : dk === 'hol' ? `<span class="tag y-hol" title="${esc(hn)}">svátek</span>` : '';
     const ni = NOTES[k] ? `<span class="ni" title="${esc(NOTES[k])}">✎</span>` : '';
     const chips = es.map(x => `<span class="chip ${x.t === 'call' ? 'c' : 'w'}">${x.t === 'call' ? '🚨' : ''}${shortTime(x.s)}–${shortTime(x.e)}</span>`).join('');
     html += `<div class="${cls}" onclick="pickDay('${k}')"><i>${d.getDate()}</i>${dot}${ni}<div class="mk">${tag}${chips}</div></div>`;
@@ -1145,6 +1161,8 @@ function setCallLength(id, minutes) { const x = D.find(q => q.id === id); if (!x
 function removeEntry(id) { D = D.filter(x => x.id !== id); save(); render(); }
 function removeDay() { D = D.filter(x => key(x.s) !== sel); delArm = false; save(); render(); }
 const DAYTYPES = [['work', 'Práce'], ['ho', 'HO'], ['off', 'Volno'], ['vac', 'Dovolená'], ['blood', 'Krev'], ['doc', 'Lékař'], ['sick', 'Nemocenská'], ['care', 'OČR']];
+// druh dne pro barvu v kalendáři: typ dne, nebo 'hol' u státního svátku (Po–Pá)
+function dkind(k) { if (DT[k]) return DT[k]; const g = dayStart(k).getDay(); return holidayName(k) && g > 0 && g < 6 ? 'hol' : ''; }
 const TAGS = { ho: 'HO', off: 'volno', vac: 'dovolená', blood: 'krev', doc: 'lékař', sick: 'nemoc', care: 'OČR' };
 // okno u lékaře: pole 's' / 'e' (čas), 'out' (mimo město)
 function setDoc(f, v) { const x = DOC[sel] || (DOC[sel] = { s: '', e: '', out: false }); x[f] = v; save(); render(); }
