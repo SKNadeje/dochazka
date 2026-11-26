@@ -387,6 +387,15 @@ button.pill { border-radius:999px; }
 .d.y-care:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-care) 15%,var(--card)); }
 .d.y-hol:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-hol) 20%,var(--card)); }
 
+/* 15) Roční nároky */
+:root { --y-sd:#7d8f2a; }
+.tag.y-sd { background:var(--y-sd); color:#fff; }
+.d.y-sd:not(.t):not(.s):not(.o) { background:color-mix(in srgb,var(--y-sd) 17%,var(--card)); }
+.yb { margin:6px 0; padding:6px 8px; border:1px solid var(--bd); border-radius:10px; background:var(--cell); }
+.yl { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:2px 8px; padding:3px 0; font-size:12px; }
+.yr2 { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.bal.ys { width:52px; text-align:right; }
+
 </style>
 </head>
 <body>
@@ -476,6 +485,8 @@ const CONFIG = {
   lunchFromHours: 6,                // pauza se odečte u směn delších než X hodin
   doctorMaxCity: 3.5,               // lékař: max. náhrada (h) ve městě
   doctorMaxOut: 5.5,                // lékař: max. náhrada (h) mimo město
+  vacationHours: 188,               // roční nárok na dovolenou (h) – upravitelný v souhrnu pro každý rok
+  sickDays: 2,                      // sick day: dnů za kalendářní rok – upravitelné v souhrnu
   autoHolidays: true,               // české státní svátky se počítají automaticky (jako odpracovaný den)
   countFutureDays: false,           // false = počítají se jen celé dny do včerejška (dnešek ani budoucnost ne)
 
@@ -600,12 +611,13 @@ function holidayName(k) {
 /* =====================================================================
    DATA V PAMĚTI + UKLÁDÁNÍ
    D    = záznamy: { id, s, e, t }   (s/e = začátek/konec v ms, t = 'work' | 'call')
-   DT   = typy dnů: { '2026-11-25': 'ho' | 'off' | 'vac' | 'blood' | 'doc' | 'sick' | 'care' }
+   DT   = typy dnů: { '2026-11-25': 'ho' | 'off' | 'vac' | 'blood' | 'sd' | 'doc' | 'sick' | 'care' }
    prof = profil: { name, fund }
    ===================================================================== */
 let D = [];
 let DT = {};
 let prof = { name: '', fund: CONFIG.defaultWeeklyFund };
+let YEARS = {};   // nároky po letech: { '2026': { vac: 188, sick: 2 } } (co není zadané, bere se z config.js)
 let DOC = {};     // lékař: { '2026-11-25': { s:'07:00', e:'09:30', out:false } }
 let NOTES = {};   // poznámky ke dnům: { '2026-11-25': 'text' }
 let BAL = {};   // zůstatek z minulého měsíce v minutách: { '2026-11': -62 }
@@ -615,12 +627,13 @@ let sel = null;                          // vybraný den ('YYYY-MM-DD') nebo nul
 
 // Místní uložení (když není Supabase)
 function readLocal() {
-  const r = { D: [], DT: {}, BAL: {}, NOTES: {}, DOC: {}, prof: { name: '', fund: CONFIG.defaultWeeklyFund } };
+  const r = { D: [], DT: {}, BAL: {}, NOTES: {}, DOC: {}, YEARS: {}, prof: { name: '', fund: CONFIG.defaultWeeklyFund } };
   try { r.D = JSON.parse(localStorage.getItem('dochazka2') || '[]'); } catch (e) {}
   try { r.DT = JSON.parse(localStorage.getItem('dochazka_dt') || '{}'); } catch (e) {}
   try { r.BAL = JSON.parse(localStorage.getItem('dochazka_bal') || '{}'); } catch (e) {}
   try { r.NOTES = JSON.parse(localStorage.getItem('dochazka_notes') || '{}'); } catch (e) {}
   try { r.DOC = JSON.parse(localStorage.getItem('dochazka_doc') || '{}'); } catch (e) {}
+  try { r.YEARS = JSON.parse(localStorage.getItem('dochazka_years') || '{}'); } catch (e) {}
   try { Object.assign(r.prof, JSON.parse(localStorage.getItem('dochazka_prof') || '{}')); } catch (e) {}
   return r;
 }
@@ -632,6 +645,7 @@ function writeLocal() {
     localStorage.setItem('dochazka_bal', JSON.stringify(BAL));
     localStorage.setItem('dochazka_notes', JSON.stringify(NOTES));
     localStorage.setItem('dochazka_doc', JSON.stringify(DOC));
+    localStorage.setItem('dochazka_years', JSON.stringify(YEARS));
   } catch (e) {}
 }
 
@@ -748,8 +762,8 @@ function dayInfo(k, hasWork) {
   const r = { kind: '', credit: 0, ex: false };
   if (!(g > 0 && g < 6)) return r;
   const hn = holidayName(k);
-  if (hn && (!t || t === 'vac' || t === 'sick' || t === 'care') && !hasWork) return { kind: 'hol', credit: norm, ex: false, name: hn };
-  if (t === 'off' || t === 'vac' || t === 'blood') return { kind: t, credit: norm, ex: false };
+  if (hn && (!t || t === 'vac' || t === 'sd' || t === 'sick' || t === 'care') && !hasWork) return { kind: 'hol', credit: norm, ex: false, name: hn };
+  if (t === 'off' || t === 'vac' || t === 'sd' || t === 'blood') return { kind: t, credit: norm, ex: false };
   if (t === 'doc') return { kind: 'doc', credit: docCredit(k), ex: false };
   if (t === 'sick' || t === 'care') return { kind: t, credit: 0, ex: true };
   if (t === 'ho' && !hasWork) return { kind: 'ho', credit: norm, ex: false };
@@ -760,7 +774,7 @@ function dayInfo(k, hasWork) {
 function calcRange(from, to, cut = true) {
   const map = perDay(), today = todayKey(), norm = prof.fund / 5 * H;
   let sh = 0, ca = 0, wd = 0, lv = 0, ex = 0;
-  const c = { off: 0, vac: 0, blood: 0, hol: 0, doc: 0, sick: 0, care: 0, ho: 0 };
+  const c = { off: 0, vac: 0, sd: 0, blood: 0, hol: 0, doc: 0, sick: 0, care: 0, ho: 0 };
   for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
     const k = key(d);
     if (cut && !CONFIG.countFutureDays && k >= today) break;   // počítá se jen do včerejška (poslední celý den)
@@ -774,11 +788,24 @@ function calcRange(from, to, cut = true) {
     if (i.ex) ex++;
   }
   // fond = pracovní dny (bez nemocenské a OČR) × denní norma; volno, dovolená, svátek, krev a lékař se započtou jako odpracované (lv)
-  const days = wd - ex, off = c.off + c.vac + c.blood + c.hol;
+  const days = wd - ex, off = c.off + c.vac + c.sd + c.blood + c.hol;
   return { sh, ca, wd, days, off, ho: c.ho, hol: c.hol, cnt: c, fund: days * norm, lv, diff: sh + lv - days * norm };
 }
 
 const monthKey = d => d.getFullYear() + '-' + pad(d.getMonth() + 1);
+
+// Roční čerpání (dovolená, sick day): počítají se i naplánované dny, svátky ne. Vrací { vac: dny, sick: dny }
+function yearUsed(y) {
+  const r = { vac: 0, sick: 0 };
+  for (const d = new Date(y, 0, 1); d.getFullYear() === y; d.setDate(d.getDate() + 1)) {
+    const k = key(d), g = d.getDay(), t = DT[k];
+    if (!(g > 0 && g < 6) || (t !== 'vac' && t !== 'sd') || holidayName(k)) continue;
+    if (t === 'vac') r.vac++; else r.sick++;
+  }
+  return r;
+}
+// nárok na rok: vac v hodinách, sick ve dnech
+function yearAllow(y, f) { const v = (YEARS[y] || {})[f]; return v !== undefined ? v : (f === 'vac' ? CONFIG.vacationHours : CONFIG.sickDays); }
 
 // měsíc má záznamy (aspoň jedna směna)?
 function hasData(y, m) {
@@ -835,7 +862,7 @@ function weekRows() {
 const CLOUD = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(CONFIG.supabaseUrl) && !/YOUR/.test(CONFIG.supabaseKey);
 let pendingUser = null;   // přihlášený, ale ještě bez hesla
 let sb = null, user = null, syncTimer = null, syncing = false;
-let snap = { d: {}, t: {}, p: '', b: '', n: '', o: '' };   // co už je v databázi (pro zjištění změn)
+let snap = { d: {}, t: {}, p: '', b: '', n: '', o: '', y: '' };   // co už je v databázi (pro zjištění změn)
 
 function setStatus(t) { const e = $('sst'); if (e) e.textContent = t; }
 function queueSync() { if (!CLOUD || !user) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 400); }
@@ -864,21 +891,21 @@ async function sync() {
     snap.t = types;
 
     // profil + zůstatky
-    const sigP = JSON.stringify([prof.name, prof.fund]), sigB = JSON.stringify(BAL), sigN = JSON.stringify(NOTES), sigO = JSON.stringify(DOC);
+    const sigP = JSON.stringify([prof.name, prof.fund]), sigB = JSON.stringify(BAL), sigN = JSON.stringify(NOTES), sigO = JSON.stringify(DOC), sigY = JSON.stringify(YEARS);
     let note = '';
-    if (sigP !== snap.p || sigB !== snap.b || sigN !== snap.n || sigO !== snap.o) {
-      const row = { user_id: user.id, name: prof.name, fund: prof.fund, balances: BAL, notes: NOTES, docs: DOC };
+    if (sigP !== snap.p || sigB !== snap.b || sigN !== snap.n || sigO !== snap.o || sigY !== snap.y) {
+      const row = { user_id: user.id, name: prof.name, fund: prof.fund, balances: BAL, notes: NOTES, docs: DOC, years: YEARS };
       let r = await sb.from('zamestnanci').upsert(row);
       // chybějící sloupec (viz supabase.sql) – uloží se aspoň zbytek
-      for (let n = 0; n < 3 && r.error; n++) {
-        const miss = ['balances', 'notes', 'docs'].filter(c => c in row && new RegExp(c, 'i').test(r.error.message));
+      for (let n = 0; n < 4 && r.error; n++) {
+        const miss = ['balances', 'notes', 'docs', 'years'].filter(c => c in row && new RegExp(c, 'i').test(r.error.message));
         if (!miss.length) break;
         miss.forEach(c => delete row[c]);
         note = ' (' + miss.join(', ') + ' ne – spusť SQL ze supabase.sql)';
         r = await sb.from('zamestnanci').upsert(row);
       }
       if (r.error) throw r.error;
-      snap.p = sigP; snap.b = sigB; snap.n = sigN; snap.o = sigO;
+      snap.p = sigP; snap.b = sigB; snap.n = sigN; snap.o = sigO; snap.y = sigY;
     }
     setStatus('☁ uloženo' + note);
   } catch (e) { setStatus('⚠ neuloženo: ' + ((e && e.message) || e)); }
@@ -901,7 +928,8 @@ async function loadCloud() {
   BAL = (c.data && c.data.balances) || {};
   NOTES = (c.data && c.data.notes) || {};
   DOC = (c.data && c.data.docs) || {};
-  snap.p = JSON.stringify([prof.name, prof.fund]); snap.b = JSON.stringify(BAL); snap.n = JSON.stringify(NOTES); snap.o = JSON.stringify(DOC);
+  YEARS = (c.data && c.data.years) || {};
+  snap.p = JSON.stringify([prof.name, prof.fund]); snap.b = JSON.stringify(BAL); snap.n = JSON.stringify(NOTES); snap.o = JSON.stringify(DOC); snap.y = JSON.stringify(YEARS);
 }
 
 /* --- vstup uživatele do aplikace --- */
@@ -921,6 +949,7 @@ async function enter(u) {
       BAL = Object.assign({}, localData.BAL);
       NOTES = Object.assign({}, localData.NOTES);
       DOC = Object.assign({}, localData.DOC);
+      YEARS = Object.assign({}, localData.YEARS);
       queueSync();
     }
   } catch (e) { setStatus('⚠ načtení selhalo: ' + ((e && e.message) || e)); }
@@ -936,7 +965,7 @@ async function initCloud() {
   if (r.data && r.data.session) await enter(r.data.session.user);
   sb.auth.onAuthStateChange((ev, sess) => {
     if (ev === 'SIGNED_OUT') {          // odhlášení: smazat data z paměti
-      user = null; D = []; DT = {}; BAL = {}; NOTES = {}; DOC = {}; prof = { name: '', fund: CONFIG.defaultWeeklyFund };
+      user = null; D = []; DT = {}; BAL = {}; NOTES = {}; DOC = {}; YEARS = {}; prof = { name: '', fund: CONFIG.defaultWeeklyFund };
       $('who').textContent = ''; $('lo').hidden = true; pendingUser = null; showLogin('login');
     } else if (ev === 'SIGNED_IN' && sess) setTimeout(() => enter(sess.user), 0);
   });
@@ -1088,6 +1117,7 @@ function renderEditor(A, dm, lastId) {
     ho: `HO se počítá jako pracovní den: +${nrm} do hodin (pokud nezadáš vlastní směnu).`,
     off: `Volno se započte jako odpracovaný den (+${nrm}), fond zůstává celý (platí Po–Pá).`,
     vac: `Dovolená se započte jako odpracovaný den (+${nrm}), fond zůstává celý (platí Po–Pá).`,
+    sd: `Sick day – placený den: započte se jako odpracovaný den (+${nrm}). Počítá se do ročního limitu (viz souhrn).`,
     blood: `Darování krve – pracovní volno s náhradou: započte se jako odpracovaný den (+${nrm}).`,
     sick: `Nemocenská: den se z fondu odečte (hodiny se nezapočítají, nevzniká mínus).`,
     care: `Ošetřování člena rodiny: den se z fondu odečte (hodiny se nezapočítají, nevzniká mínus).`
@@ -1160,16 +1190,16 @@ function nudge(id, which, delta) {            // tlačítka − / +  (u zásahu 
 function setCallLength(id, minutes) { const x = D.find(q => q.id === id); if (!x) return; x.e = x.s + minutes * MIN; save(); render(); }
 function removeEntry(id) { D = D.filter(x => x.id !== id); save(); render(); }
 function removeDay() { D = D.filter(x => key(x.s) !== sel); delArm = false; save(); render(); }
-const DAYTYPES = [['work', 'Práce'], ['ho', 'HO'], ['off', 'Volno'], ['vac', 'Dovolená'], ['blood', 'Krev'], ['doc', 'Lékař'], ['sick', 'Nemocenská'], ['care', 'OČR']];
+const DAYTYPES = [['work', 'Práce'], ['ho', 'HO'], ['off', 'Volno'], ['vac', 'Dovolená'], ['sd', 'Sick day'], ['blood', 'Krev'], ['doc', 'Lékař'], ['sick', 'Nemocenská'], ['care', 'OČR']];
 // druh dne pro barvu v kalendáři: typ dne, nebo 'hol' u státního svátku (Po–Pá)
 function dkind(k) { if (DT[k]) return DT[k]; const g = dayStart(k).getDay(); return holidayName(k) && g > 0 && g < 6 ? 'hol' : ''; }
-const TAGS = { ho: 'HO', off: 'volno', vac: 'dovolená', blood: 'krev', doc: 'lékař', sick: 'nemoc', care: 'OČR' };
+const TAGS = { ho: 'HO', off: 'volno', vac: 'dovolená', sd: 'sick day', blood: 'krev', doc: 'lékař', sick: 'nemoc', care: 'OČR' };
 // okno u lékaře: pole 's' / 'e' (čas), 'out' (mimo město)
 function setDoc(f, v) { const x = DOC[sel] || (DOC[sel] = { s: '', e: '', out: false }); x[f] = v; save(); render(); }
 // shrnutí počtu dnů podle typu (pro souhrn i PDF)
 function daysLine(s) {
   const c = s.cnt, p = [];
-  if (c.off) p.push('Volno: ' + c.off + ' d'); if (c.vac) p.push('Dovolená: ' + c.vac + ' d'); if (c.blood) p.push('Krev: ' + c.blood + ' d');
+  if (c.off) p.push('Volno: ' + c.off + ' d'); if (c.vac) p.push('Dovolená: ' + c.vac + ' d'); if (c.sd) p.push('Sick day: ' + c.sd + ' d'); if (c.blood) p.push('Krev: ' + c.blood + ' d');
   if (c.hol) p.push('Svátky: ' + c.hol + ' d'); if (c.doc) p.push('Lékař: ' + c.doc + '×'); if (c.sick) p.push('Nemocenská: ' + c.sick + ' d');
   if (c.care) p.push('OČR: ' + c.care + ' d'); if (c.ho) p.push('HO: ' + c.ho + ' d');
   return p.join(' · ');
@@ -1257,6 +1287,10 @@ function setBalance(v) {
   BAL[monthKey(cur)] = min; save(); render();
 }
 function useAutoBalance() { delete BAL[monthKey(cur)]; save(); render(); }
+function setYear(f, v) {
+  const n = parseFloat(String(v).replace(',', '.')); if (!(n >= 0)) { render(); return; }
+  const y = cur.getFullYear(); (YEARS[y] = YEARS[y] || {})[f] = n; save(); render();
+}
 function setNote(v) { v = v.trim().slice(0, 300); if (v) NOTES[sel] = v; else delete NOTES[sel]; save(); render(); }
 
 function weeksHtml() {
@@ -1265,6 +1299,16 @@ function weeksHtml() {
     return `<tr><td><b>KV ${isoWeek(x.w)}</b> <span class="mut">${fmtDate(x.w)}</span></td><td>${fmtMs(x.sh + x.lv)}</td><td>${fmtMs(x.ca)}</td><td>${fmtMs(x.fund)}</td><td class="${d < 0 ? 'neg' : 'pos'}">${signedMs(d)}</td></tr>`;
   }).join('');
   return `<table class="wt"><tr><th>KV</th><th>Směny</th><th>Zásahy</th><th>Fond</th><th>±</th></tr>${rows}</table>`;
+}
+
+// Dovolená a sick day za kalendářní rok zobrazeného měsíce (nárok jde upravit, stejně jako zůstatek)
+function yearHtml() {
+  const y = cur.getFullYear(), u = yearUsed(y), norm = prof.fund / 5;
+  const vAll = yearAllow(y, 'vac'), vUsed = u.vac * norm, vRem = vAll - vUsed, sAll = yearAllow(y, 'sick'), sRem = sAll - u.sick;
+  const num = x => String(Math.round(x * 100) / 100).replace('.', ',');
+  const line = (name, used, all, f, unit, rem) => `<div class="yl"><span>${name} ${y} <small class="mut">čerpáno ${used}</small></span>
+    <span class="yr2">nárok <input class="bal ys" value="${num(all)}" onchange="setYear('${f}',this.value)" onfocus="this.select()" aria-label="Nárok ${name}"> ${unit} · <b class="${rem < 0 ? 'neg' : 'pos'}">zbývá ${num(rem)} ${unit}</b></span></div>`;
+  return `<div class="yb">${line('Dovolená', fmtH(vUsed), vAll, 'vac', 'h', vRem)}${line('Sick day', u.sick + ' d', sAll, 'sick', 'd', sRem)}</div>`;
 }
 
 function renderSummary() {
@@ -1284,6 +1328,7 @@ function renderSummary() {
     <div class="sr"><span>Zůstatek z min. měsíce <small class="mut">(k ${fmtDate(s.balDate)})</small></span><input class="bal" value="${balText(s.bal / MIN)}" onchange="setBalance(this.value)" onfocus="this.select()" aria-label="Zůstatek z minulého měsíce"></div>${hint}
     ${row('Celkem se zůstatkem k ' + asOf, signedMs(s.total), 'total ' + (s.total < 0 ? 'neg' : 'pos'))}
     ${row('Doba zásahů (zvlášť)', fmtMs(s.ca))}
+    ${yearHtml()}
     <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · ${daysLine(s)}</div>
     ${weeksHtml()}</div>`;
 }
@@ -1350,7 +1395,7 @@ async function exportPdf() {
       const sh = works.reduce((a, x) => a + netMs(x), 0) + inf.credit;
       const ch = calls.reduce((a, x) => a + x.e - x.s, 0);
       const restColor = rest ? (rest.c === 'ok' ? GREEN : rest.c === 'wa' ? '#b26a00' : '#c62828') : '#1b2620';
-      const LBL = { off: 'Volno', vac: 'Dovolená', blood: 'Krev', hol: 'Svátek', sick: 'Nemocenská', care: 'OČR', ho: 'HO' };
+      const LBL = { off: 'Volno', vac: 'Dovolená', sd: 'Sick day', blood: 'Krev', hol: 'Svátek', sick: 'Nemocenská', care: 'OČR', ho: 'HO' };
       const dx = DOC[k], docT = type === 'doc' ? 'Lékař' + (dx && dx.s && dx.e ? ' ' + dx.s.replace(/^0/, '') + '–' + dx.e.replace(/^0/, '') : '') : '';
       const wt = works.map(x => hm(x.s) + '–' + hm(x.e)).join(', ');
       const shiftText = [wt || (!docT ? (LBL[inf.kind] || LBL[type] || '–') : ''), docT].filter(Boolean).join(' + ');
@@ -1402,7 +1447,7 @@ async function exportPdf() {
    SPUŠTĚNÍ A DROBNOSTI (téma, profil, klávesa Delete)
    ===================================================================== */
 const localData = readLocal();      // data z tohoto zařízení (použijí se jen bez Supabase / pro nabídku přenosu)
-if (!CLOUD) { D = localData.D; DT = localData.DT; prof = localData.prof; BAL = localData.BAL; NOTES = localData.NOTES; DOC = localData.DOC; }
+if (!CLOUD) { D = localData.D; DT = localData.DT; prof = localData.prof; BAL = localData.BAL; NOTES = localData.NOTES; DOC = localData.DOC; YEARS = localData.YEARS; }
 
 /* --- světlý / tmavý režim --- */
 function applyTheme(t) {
