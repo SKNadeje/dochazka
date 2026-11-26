@@ -406,6 +406,8 @@ kbd { font:inherit; font-size:9px; opacity:.6; border:1px solid currentColor; bo
 .arrrow { display:flex; gap:8px; margin:6px 0 10px; } .arrrow .dti { flex:0 0 96px; text-align:center; } .arrrow button { flex:1; }
 .ent.open { border-style:dashed; }
 
+#ed.hid { visibility:hidden; pointer-events:none; }
+
 </style>
 </head>
 <body>
@@ -849,6 +851,8 @@ function monthStats() {
   r.balExplicit = BAL[r.key] !== undefined;
   r.autoBal = carryIn(y, m);                         // minuty, nebo null (minulý měsíc bez záznamů)
   r.bal = (r.balExplicit ? BAL[r.key] : (r.autoBal || 0)) * MIN;   // zůstatek z minulého měsíce
+  const all = calcRange(a, b, false);                // celý měsíc včetně dneška a plánovaných dnů
+  r.remain = all.fund - all.sh - all.lv - r.bal;     // kolik ještě zbývá odpracovat (záporné = přesčas)
   r.total = r.diff + r.bal;                          // rozdíl za měsíc + zůstatek
   return r;
 }
@@ -1126,7 +1130,8 @@ function renderEditor(A, dm, lastId) {
   ed.classList.toggle('open', open);
   $('bk').classList.toggle('on', sheet);
   document.body.classList.toggle('lock', sheet);
-  if (!sel) { ed.innerHTML = '<p class="mut">Klepni na den v kalendáři.</p>'; return; }
+  ed.classList.toggle('hid', !open && !DESK.matches);    // na mobilu zavřený panel úplně schovat (nepřekrývá spodek)
+  if (!sel) { ed.innerHTML = DESK.matches ? '<p class="mut">Klepni na den v kalendáři.</p>' : ''; return; }
 
   const es = D.filter(x => key(x.s) === sel).sort((p, q) => p.s - q.s), st = CONFIG.stepMinutes;
   const type = DT[sel] || 'work';
@@ -1361,6 +1366,7 @@ function renderSummary() {
     ${row('Rozdíl za měsíc k ' + asOf, signedMs(diff), diff < 0 ? 'neg' : 'pos')}
     <div class="sr"><span>Zůstatek z min. měsíce <small class="mut">(k ${fmtDate(s.balDate)})</small></span><input class="bal" value="${balText(s.bal / MIN)}" onchange="setBalance(this.value)" onfocus="this.select()" aria-label="Zůstatek z minulého měsíce"></div>${hint}
     ${row('Celkem se zůstatkem k ' + asOf, signedMs(s.total), 'total ' + (s.total < 0 ? 'neg' : 'pos'))}
+    ${row(s.remain > 0 ? 'Zbývá do konce měsíce' : 'Přesčas za měsíc', fmtMs(Math.abs(s.remain)), s.remain > 0 ? '' : 'pos')}
     ${row('Doba zásahů (zvlášť)', fmtMs(s.ca))}
     ${yearHtml()}
     <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · ${daysLine(s)}</div></div>`;
