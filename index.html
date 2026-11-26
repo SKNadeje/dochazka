@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Docházka – Schaeffler motion technologies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* =====================================================================
    VZHLED – zeleno-bílé schéma Schaeffler
@@ -241,6 +243,125 @@ button.lnk { background:none; border:0; padding:0 0 0 6px; color:var(--ac-tx); f
   .sr { padding:3px 0; } .card { padding:8px 10px; }
   .ent { margin-top:6px; } .sec { margin:8px 0 4px; }
 }
+
+/* ---------- 11) LUXUSNÍ VZHLED ----------
+   Smaragdová + šampaňské zlato, teplá slonovina, jemné stíny, patkové nadpisy.
+   Přepisuje barvy a tvary výše; rozměry a rozložení zůstávají. */
+:root {
+  --bg:#f3f0e9; --card:#fffdf9; --cell:#f9f7f1; --bd:#e5dfd1; --tx:#16201a; --mut:#6b736b;
+  --ac:#00793a; --ac-dk:#00522a; --ac-tx:#00632f; --tint:#e4f1e7; --today:#fbf3dc;
+  --gold:#b08d4a; --gold-l:#e0c98b; --grey:#2e3a33;
+  --sh:0 1px 0 rgba(255,255,255,.9) inset, 0 10px 30px -14px rgba(0,50,25,.28);
+  --serif:'Cormorant Garamond','Iowan Old Style',Georgia,'Times New Roman',serif;
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+:root[data-theme="dark"] {
+  --bg:#080d0a; --card:#111913; --cell:#16201a; --bd:#233028; --tx:#ece8dc; --mut:#98a59b;
+  --ac:#0a8a40; --ac-dk:#064e26; --ac-tx:#5fe08f; --tint:#143222; --today:#2a2410;
+  --gold:#caa75d; --gold-l:#e8d49b;
+  --sh:0 1px 0 rgba(255,255,255,.04) inset, 0 14px 34px -16px rgba(0,0,0,.7);
+}
+html { background:var(--bg); }
+body { font-family:var(--sans); letter-spacing:.005em; -webkit-font-smoothing:antialiased;
+  background:radial-gradient(1200px 500px at 85% -10%,rgba(176,141,74,.10),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(0,121,58,.07),transparent 60%),var(--bg); }
+:root[data-theme="dark"] body { background:radial-gradient(1200px 500px at 85% -10%,rgba(202,167,93,.08),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(10,138,64,.10),transparent 60%),var(--bg); }
+
+/* hlavička */
+header { background:linear-gradient(115deg,#002a15 0%,#00552a 52%,#007a38 100%); border-bottom:0;
+  box-shadow:0 14px 34px -14px rgba(0,60,30,.55), inset 0 -2px 0 var(--gold); position:relative; }
+header::after { content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:radial-gradient(500px 120px at 8% 0%,rgba(224,201,139,.18),transparent 70%); }
+.brand b { font-family:var(--serif); font-weight:700; letter-spacing:.03em; text-shadow:0 1px 8px rgba(0,0,0,.25); }
+.brand span { font-family:var(--serif); font-weight:600; font-style:italic; color:var(--gold-l); letter-spacing:.02em; }
+.brand small { color:var(--gold-l); letter-spacing:.14em; text-transform:uppercase; font-size:10px; opacity:.9; }
+.prof label { color:var(--gold-l); text-transform:uppercase; letter-spacing:.1em; font-size:9.5px; }
+.prof input { background:rgba(255,255,255,.96); box-shadow:inset 0 1px 3px rgba(0,0,0,.12); }
+.prof button.g { background:rgba(255,255,255,.10); color:#fff; border:1px solid rgba(224,201,139,.45); backdrop-filter:blur(6px); }
+.prof button.g:hover { background:rgba(255,255,255,.2); }
+.prof #pdf { background:linear-gradient(135deg,#ecd9a2,#b08d4a); color:#1d1604; border:0; box-shadow:0 6px 16px -6px rgba(176,141,74,.8); }
+.prof #pdf:hover { filter:brightness(1.06); }
+.who { color:#e9efe9; }
+
+/* karty */
+.card { border:1px solid var(--bd); border-radius:22px; box-shadow:var(--sh);
+  background-color:var(--card); background-image:linear-gradient(90deg,transparent,var(--gold),transparent);
+  background-size:calc(100% - 56px) 2px; background-repeat:no-repeat; background-position:center top; }
+.tt { font-family:var(--sans); font-size:10.5px; letter-spacing:.16em; color:var(--gold); }
+.nav b, #mt { font-family:var(--serif); font-weight:700; color:var(--ac-tx); letter-spacing:.02em; }
+#mt { font-size:26px; }
+:root[data-theme="dark"] .nav b { color:var(--gold-l); }
+
+/* tlačítka */
+button { background:linear-gradient(135deg,var(--ac),var(--ac-dk)); box-shadow:0 6px 14px -8px rgba(0,60,30,.7); transition:transform .12s,filter .15s,box-shadow .15s; }
+button:hover { filter:brightness(1.08); } button:active { transform:translateY(1px) scale(.99); }
+button.g { background:transparent; color:var(--ac-tx); border:1px solid color-mix(in srgb,var(--ac) 55%,transparent); box-shadow:none; }
+button.g:hover { background:color-mix(in srgb,var(--ac) 10%,transparent); }
+button.g.on, .ch.on { background:linear-gradient(135deg,var(--ac),var(--ac-dk)); color:#fff; border-color:transparent; }
+button.danger, button.pill.danger { background:linear-gradient(135deg,#d94b4b,#a82424); box-shadow:0 6px 14px -8px rgba(168,36,36,.8); }
+button.outline-red { background:transparent; box-shadow:none; }
+button.x { background:none; box-shadow:none; }
+.seg button:not(.g) { box-shadow:0 8px 18px -10px rgba(0,60,30,.9); }
+
+/* kalendář */
+.hrow { background:linear-gradient(100deg,#003d1e,#006b32); border-radius:12px; box-shadow:inset 0 -1px 0 rgba(224,201,139,.5); }
+.h { letter-spacing:.14em; text-transform:uppercase; font-size:10px; }
+.kv { background:transparent; color:var(--gold); border:1px solid var(--bd); font-family:var(--serif); font-size:11px; }
+.d { background:var(--cell); border:1px solid var(--bd); transition:transform .12s,box-shadow .15s,border-color .15s; }
+.d:hover { transform:translateY(-1px); border-color:var(--gold-l); box-shadow:0 8px 18px -10px rgba(0,50,25,.45); z-index:1; }
+.d i { font-family:var(--serif); font-weight:700; }
+.d.we { background:color-mix(in srgb,var(--ac) 5%,var(--cell)); }
+.d.t { background:var(--today); border:1px solid var(--gold); box-shadow:inset 0 0 0 1px var(--gold-l); }
+.d.t i { background:linear-gradient(135deg,var(--ac),var(--ac-dk)); color:#fff; box-shadow:0 0 0 2px var(--gold-l); }
+.d.s { background:var(--tint); border:1px solid var(--ac); box-shadow:0 0 0 2px var(--ac), 0 10px 22px -12px rgba(0,60,30,.7); }
+.d.s.t { box-shadow:0 0 0 2px var(--gold), 0 10px 22px -12px rgba(176,141,74,.7); }
+.chip.w { background:linear-gradient(135deg,var(--ac),var(--ac-dk)); box-shadow:0 2px 6px -2px rgba(0,60,30,.6); }
+.chip.c { background:linear-gradient(135deg,#d94b4b,#a82424); }
+.tag.ho { background:var(--grey); } .tag.vo { background:color-mix(in srgb,var(--gold) 25%,var(--card)); color:var(--tx); }
+.d u { box-shadow:0 0 0 2px var(--card); }
+.legend { letter-spacing:.02em; }
+
+/* editor dne */
+#ed { border-radius:24px 24px 0 0; } .grab { background:var(--gold-l); }
+.ent { background:var(--cell); border:1px solid var(--bd); border-left:4px solid var(--ac); border-radius:14px; }
+.ent.call { border-left-color:#c23a3a; }
+.tc input { background:var(--card); border:1px solid var(--bd); box-shadow:inset 0 1px 2px rgba(0,0,0,.05); font-feature-settings:'tnum'; }
+.sec { font-family:var(--sans); color:var(--gold); letter-spacing:.16em; font-size:11px; border-bottom:1px solid var(--bd); padding-bottom:4px; }
+.badge { background:var(--cell); border-radius:12px; }
+button.pill { border-radius:999px; }
+
+/* karty odpočinku */
+.sc { border:1px solid var(--bd); border-left-width:5px; border-radius:20px; box-shadow:var(--sh); background:var(--card); }
+.ico { box-shadow:0 8px 16px -8px currentColor, inset 0 1px 0 rgba(255,255,255,.35); }
+.sc.ok .ico { background:linear-gradient(135deg,#27b25a,#0f7a37); } .sc.wa .ico { background:linear-gradient(135deg,#f0a237,#c26d0a); } .sc.er .ico { background:linear-gradient(135deg,#ea5a5a,#b02323); }
+.big { font-family:var(--serif); font-weight:700; letter-spacing:.01em; }
+.big small { font-family:var(--sans); letter-spacing:.02em; }
+.bar { height:8px; background:color-mix(in srgb,var(--tx) 8%,transparent); border-radius:4px; }
+.bar u { border-radius:4px; box-shadow:0 0 10px -2px currentColor; }
+.tb th { color:var(--gold); border-bottom:1px solid var(--gold-l); letter-spacing:.1em; text-transform:uppercase; font-size:10px; }
+.tb td { border-top:1px solid var(--bd); } .tb td b { font-family:var(--serif); font-size:17px; font-weight:700; }
+.tb .rh { font-family:var(--sans); font-size:12px; letter-spacing:.02em; }
+
+/* hodiny a fond */
+.sr { border-top:1px solid var(--bd); }
+.sr b { font-family:var(--serif); font-size:17px; font-weight:700; font-feature-settings:'tnum'; }
+.sr.total { background:linear-gradient(100deg,color-mix(in srgb,var(--ac) 10%,var(--card)),var(--card)); border:1px solid var(--gold-l); border-radius:14px; }
+.sr.total b { font-size:22px; }
+.bal { background:var(--cell); border:1px solid var(--bd); font-family:var(--serif); font-size:16px; }
+.wt th { color:var(--gold); border-bottom:1px solid var(--gold-l); letter-spacing:.08em; text-transform:uppercase; font-size:10px; }
+.wt b { font-family:var(--serif); }
+.asof { letter-spacing:.02em; }
+
+/* přihlášení a hlášky */
+#login { background:radial-gradient(900px 600px at 50% -10%,rgba(176,141,74,.25),transparent 60%),linear-gradient(160deg,#001d0f,#005a2b 70%,#007a38); }
+.lbox { border:1px solid var(--gold-l); border-radius:26px; padding:30px 26px; box-shadow:0 30px 70px -20px rgba(0,0,0,.6); background-image:linear-gradient(90deg,transparent,var(--gold),transparent); background-size:calc(100% - 56px) 2px; background-repeat:no-repeat; background-position:center top; }
+.lbox h2 { font-family:var(--serif); font-size:26px; letter-spacing:.02em; text-align:center; color:var(--ac-tx); }
+.lbox p { text-align:center; } .lbox input { background:var(--cell); border-radius:12px; padding:13px; }
+#toast { background:linear-gradient(135deg,#1d2a22,#0e1612); border:1px solid var(--gold); color:#f3efe2; border-radius:14px; }
+
+/* jemný náběh */
+@keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+.card, .sc { animation:rise .35s ease both; }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
 
 </style>
 </head>
