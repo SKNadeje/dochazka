@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Docházka – Schaeffler motion technologies</title>
+<title>Docházka – Schaeffler Motion Technologies</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -363,6 +363,10 @@ button.pill { border-radius:999px; }
 .card, .sc { animation:rise .35s ease both; }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
 
+/* 12) Poznámky */
+.ni { position:absolute; right:5px; top:3px; font-size:11px; color:var(--gold); }
+.nt { width:100%; box-sizing:border-box; resize:vertical; font:inherit; font-size:13px; padding:8px 10px; border:1px solid var(--bd); border-radius:10px; background:var(--card); color:var(--tx); }
+
 </style>
 </head>
 <body>
@@ -437,7 +441,6 @@ button.pill { border-radius:999px; }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 
 <script>
-/* ################ config.js ################ */
 /* =====================================================================
    NASTAVENÍ – tohle je jediný soubor, který běžně upravuješ.
    (Při aktualizaci ostatních souborů se tvoje klíče nepřepíšou.)
@@ -451,6 +454,7 @@ const CONFIG = {
   defaultWeeklyFund: 37.5,          // výchozí týdenní fond (h)
   lunchMin: 30,                     // pauza na oběd (minuty)
   lunchFromHours: 6,                // pauza se odečte u směn delších než X hodin
+  autoHolidays: true,               // české státní svátky se počítají automaticky (jako odpracovaný den)
   countFutureDays: false,           // false = počítají se jen celé dny do včerejška (dnešek ani budoucnost ne)
 
   // --- Rychlé přidávání ---
@@ -466,7 +470,6 @@ const CONFIG = {
   }
 };
 
-/* ################ js/utils.js ################ */
 /* =====================================================================
    POMOCNÉ FUNKCE – čas, datum, formátování. Nic tu nezávisí na datech.
    ===================================================================== */
@@ -540,7 +543,38 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', 9000);
 }
 
-/* ################ js/state.js ################ */
+/* =====================================================================
+   ČESKÉ STÁTNÍ SVÁTKY (počítají se automaticky, vypnutí: CONFIG.autoHolidays = false)
+   Svátek ve všední den se započte jako odpracovaný den (stejně jako volno).
+   Chceš-li ten den přesto jinak, vyber v kalendáři HO / Volno.
+   ===================================================================== */
+const _holCache = {};
+function holidaysOf(y) {
+  if (_holCache[y]) return _holCache[y];
+  // Velikonoce – Gaussův algoritmus (gregoriánský kalendář)
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1;
+  const easter = new Date(y, mo - 1, da);
+  const rel = n => { const x = new Date(easter); x.setDate(x.getDate() + n); return key(x); };
+  const fx = (mm, dd) => y + '-' + pad(mm) + '-' + pad(dd);
+  const map = {
+    [fx(1, 1)]: 'Nový rok', [rel(-2)]: 'Velký pátek', [rel(1)]: 'Velikonoční pondělí',
+    [fx(5, 1)]: 'Svátek práce', [fx(5, 8)]: 'Den vítězství', [fx(7, 5)]: 'Cyril a Metoděj',
+    [fx(7, 6)]: 'Jan Hus', [fx(9, 28)]: 'Den české státnosti', [fx(10, 28)]: 'Vznik Československa',
+    [fx(11, 17)]: 'Den boje za svobodu', [fx(12, 24)]: 'Štědrý den', [fx(12, 25)]: '1. svátek vánoční',
+    [fx(12, 26)]: '2. svátek vánoční'
+  };
+  return (_holCache[y] = map);
+}
+// název svátku pro klíč 'YYYY-MM-DD' (nebo '')
+function holidayName(k) {
+  if (CONFIG.autoHolidays === false) return '';
+  return holidaysOf(+k.slice(0, 4))[k] || '';
+}
+
 /* =====================================================================
    DATA V PAMĚTI + UKLÁDÁNÍ
    D    = záznamy: { id, s, e, t }   (s/e = začátek/konec v ms, t = 'work' | 'call')
@@ -550,6 +584,7 @@ function toast(msg) {
 let D = [];
 let DT = {};
 let prof = { name: '', fund: CONFIG.defaultWeeklyFund };
+let NOTES = {};   // poznámky ke dnům: { '2026-11-25': 'text' }
 let BAL = {};   // zůstatek z minulého měsíce v minutách: { '2026-11': -62 }
 
 let cur = new Date(); cur.setDate(1);   // zobrazený měsíc
@@ -557,10 +592,11 @@ let sel = null;                          // vybraný den ('YYYY-MM-DD') nebo nul
 
 // Místní uložení (když není Supabase)
 function readLocal() {
-  const r = { D: [], DT: {}, BAL: {}, prof: { name: '', fund: CONFIG.defaultWeeklyFund } };
+  const r = { D: [], DT: {}, BAL: {}, NOTES: {}, prof: { name: '', fund: CONFIG.defaultWeeklyFund } };
   try { r.D = JSON.parse(localStorage.getItem('dochazka2') || '[]'); } catch (e) {}
   try { r.DT = JSON.parse(localStorage.getItem('dochazka_dt') || '{}'); } catch (e) {}
   try { r.BAL = JSON.parse(localStorage.getItem('dochazka_bal') || '{}'); } catch (e) {}
+  try { r.NOTES = JSON.parse(localStorage.getItem('dochazka_notes') || '{}'); } catch (e) {}
   try { Object.assign(r.prof, JSON.parse(localStorage.getItem('dochazka_prof') || '{}')); } catch (e) {}
   return r;
 }
@@ -570,13 +606,13 @@ function writeLocal() {
     localStorage.setItem('dochazka_dt', JSON.stringify(DT));
     localStorage.setItem('dochazka_prof', JSON.stringify(prof));
     localStorage.setItem('dochazka_bal', JSON.stringify(BAL));
+    localStorage.setItem('dochazka_notes', JSON.stringify(NOTES));
   } catch (e) {}
 }
 
 // Zavolej po každé změně dat. S Supabase se uloží do databáze, jinak do prohlížeče.
 function save() { if (CLOUD) queueSync(); else writeLocal(); }
 
-/* ################ js/rules.js ################ */
 /* =====================================================================
    PRAVIDLA ODPOČINKU
    Denní:   11 h, minimum 8 h; po zkrácení musí další odpočinek mít 13 h.
@@ -643,7 +679,6 @@ function analyze(list) {
   return { S, daily, weekly, prevShort, ps };
 }
 
-/* ################ js/stats.js ################ */
 /* =====================================================================
    HODINY A FOND
    - směna = délka mínus pauza na oběd (config.js)
@@ -674,7 +709,7 @@ function perDay() {
 // Hodiny a fond za období od–do (Date, včetně). cut=true: dny po dnešku se nepočítají.
 function calcRange(from, to, cut = true) {
   const map = perDay(), today = todayKey(), norm = prof.fund / 5 * H;
-  let sh = 0, ca = 0, wd = 0, off = 0, ho = 0;
+  let sh = 0, ca = 0, wd = 0, off = 0, ho = 0, hol = 0;
   for (const d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
     const k = key(d);
     if (cut && !CONFIG.countFutureDays && k >= today) break;   // počítá se jen do včerejška (poslední celý den)
@@ -683,13 +718,28 @@ function calcRange(from, to, cut = true) {
     sh += day.sh; ca += day.ca;
     if (weekday) wd++;
     if (DT[k] === 'off' && weekday) off++;
+    else if (weekday && !DT[k] && !day.work && holidayName(k)) { off++; hol++; }   // státní svátek = odpracovaný den
     if (DT[k] === 'ho' && !day.work) { ho++; sh += norm; }
   }
   // fond = všechny pracovní dny × denní norma; volno se nesnižuje fond, ale ZAPOČTE se jako odpracovaný den (lv)
-  return { sh, ca, wd, off, ho, days: wd, fund: wd * norm, lv: off * norm, diff: sh + off * norm - wd * norm };
+  return { sh, ca, wd, off, ho, hol, days: wd, fund: wd * norm, lv: off * norm, diff: sh + off * norm - wd * norm };
 }
 
 const monthKey = d => d.getFullYear() + '-' + pad(d.getMonth() + 1);
+
+// měsíc má záznamy (aspoň jedna směna)?
+function hasData(y, m) {
+  const a = new Date(y, m, 1).getTime(), b = new Date(y, m + 1, 1).getTime();
+  return D.some(x => x.t === 'work' && x.s >= a && x.s < b);
+}
+// Automatický zůstatek do měsíce (y,m): rozdíl minulého měsíce + jeho zůstatek (ručně zadaný, jinak řetězově dál). V minutách; null = nic k přenosu.
+function carryIn(y, m, depth = 0) {
+  const py = m ? y : y - 1, pm = m ? m - 1 : 11, pk = py + '-' + pad(pm + 1);
+  if (depth > 24 || !hasData(py, pm)) return null;
+  const p = calcRange(new Date(py, pm, 1), new Date(py, pm + 1, 0));
+  const before = BAL[pk] !== undefined ? BAL[pk] : (carryIn(py, pm, depth + 1) || 0);
+  return Math.round(p.diff / MIN) + before;
+}
 
 // Zobrazený měsíc (+ fond za celý měsíc pro srovnání)
 function monthStats() {
@@ -702,11 +752,10 @@ function monthStats() {
   r.asOf = last >= a ? last : null;                  // datum, ke kterému rozdíl platí (poslední celý den)
   r.balDate = new Date(y, m, 0);                     // zůstatek z min. měsíce platí k poslednímu dni min. měsíce
   r.key = monthKey(a);
-  r.bal = (BAL[r.key] || 0) * MIN;                 // zůstatek z minulého měsíce
-  r.total = r.diff + r.bal;                 // rozdíl za měsíc + zůstatek
-  const p = calcRange(new Date(y, m - 1, 1), new Date(y, m, 0));   // minulý měsíc podle záznamů (pro srovnání)
-  r.prevDiff = p.diff;
-  r.prevHas = p.sh > 0 || p.ca > 0 || p.ho > 0;
+  r.balExplicit = BAL[r.key] !== undefined;
+  r.autoBal = carryIn(y, m);                         // minuty, nebo null (minulý měsíc bez záznamů)
+  r.bal = (r.balExplicit ? BAL[r.key] : (r.autoBal || 0)) * MIN;   // zůstatek z minulého měsíce
+  r.total = r.diff + r.bal;                          // rozdíl za měsíc + zůstatek
   return r;
 }
 
@@ -725,7 +774,6 @@ function weekRows() {
   return rows;
 }
 
-/* ################ js/cloud.js ################ */
 /* =====================================================================
    SUPABASE: přihlášení e-mailem (kód) + synchronizace dat
    Tabulky: zamestnanci (profil), dochazka_zaznamy (směny a zásahy), dochazka_dny (HO/volno)
@@ -734,7 +782,7 @@ function weekRows() {
 const CLOUD = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(CONFIG.supabaseUrl) && !/YOUR/.test(CONFIG.supabaseKey);
 let pendingUser = null;   // přihlášený, ale ještě bez hesla
 let sb = null, user = null, syncTimer = null, syncing = false;
-let snap = { d: {}, t: {}, p: '', b: '' };   // co už je v databázi (pro zjištění změn)
+let snap = { d: {}, t: {}, p: '', b: '', n: '' };   // co už je v databázi (pro zjištění změn)
 
 function setStatus(t) { const e = $('sst'); if (e) e.textContent = t; }
 function queueSync() { if (!CLOUD || !user) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 400); }
@@ -763,16 +811,21 @@ async function sync() {
     snap.t = types;
 
     // profil + zůstatky
-    const sigP = JSON.stringify([prof.name, prof.fund]), sigB = JSON.stringify(BAL);
+    const sigP = JSON.stringify([prof.name, prof.fund]), sigB = JSON.stringify(BAL), sigN = JSON.stringify(NOTES);
     let note = '';
-    if (sigP !== snap.p || sigB !== snap.b) {
-      let r = await sb.from('zamestnanci').upsert({ user_id: user.id, name: prof.name, fund: prof.fund, balances: BAL });
-      if (r.error && /balances/i.test(r.error.message)) {       // sloupec ještě není v databázi (viz supabase.sql)
-        r = await sb.from('zamestnanci').upsert({ user_id: user.id, name: prof.name, fund: prof.fund });
-        note = ' (zůstatky ne – spusť SQL ze supabase.sql)';
+    if (sigP !== snap.p || sigB !== snap.b || sigN !== snap.n) {
+      const row = { user_id: user.id, name: prof.name, fund: prof.fund, balances: BAL, notes: NOTES };
+      let r = await sb.from('zamestnanci').upsert(row);
+      // chybějící sloupec (viz supabase.sql) – uloží se aspoň zbytek
+      for (let n = 0; n < 2 && r.error; n++) {
+        const miss = ['balances', 'notes'].filter(c => c in row && new RegExp(c, 'i').test(r.error.message));
+        if (!miss.length) break;
+        miss.forEach(c => delete row[c]);
+        note = ' (' + miss.join(', ') + ' ne – spusť SQL ze supabase.sql)';
+        r = await sb.from('zamestnanci').upsert(row);
       }
       if (r.error) throw r.error;
-      snap.p = sigP; snap.b = sigB;
+      snap.p = sigP; snap.b = sigB; snap.n = sigN;
     }
     setStatus('☁ uloženo' + note);
   } catch (e) { setStatus('⚠ neuloženo: ' + ((e && e.message) || e)); }
@@ -793,7 +846,8 @@ async function loadCloud() {
   snap.d = {}; D.forEach(x => snap.d[x.id] = entrySig(x));
   snap.t = Object.assign({}, DT);
   BAL = (c.data && c.data.balances) || {};
-  snap.p = JSON.stringify([prof.name, prof.fund]); snap.b = JSON.stringify(BAL);
+  NOTES = (c.data && c.data.notes) || {};
+  snap.p = JSON.stringify([prof.name, prof.fund]); snap.b = JSON.stringify(BAL); snap.n = JSON.stringify(NOTES);
 }
 
 /* --- vstup uživatele do aplikace --- */
@@ -811,6 +865,7 @@ async function enter(u) {
       DT = Object.assign({}, localData.DT);
       if (localData.prof.name) prof = Object.assign({}, localData.prof);
       BAL = Object.assign({}, localData.BAL);
+      NOTES = Object.assign({}, localData.NOTES);
       queueSync();
     }
   } catch (e) { setStatus('⚠ načtení selhalo: ' + ((e && e.message) || e)); }
@@ -826,7 +881,7 @@ async function initCloud() {
   if (r.data && r.data.session) await enter(r.data.session.user);
   sb.auth.onAuthStateChange((ev, sess) => {
     if (ev === 'SIGNED_OUT') {          // odhlášení: smazat data z paměti
-      user = null; D = []; DT = {}; BAL = {}; prof = { name: '', fund: CONFIG.defaultWeeklyFund };
+      user = null; D = []; DT = {}; BAL = {}; NOTES = {}; prof = { name: '', fund: CONFIG.defaultWeeklyFund };
       $('who').textContent = ''; $('lo').hidden = true; pendingUser = null; showLogin('login');
     } else if (ev === 'SIGNED_IN' && sess) setTimeout(() => enter(sess.user), 0);
   });
@@ -879,7 +934,6 @@ async function setPassword() {
   await enter(r.data.user || u);
 }
 
-/* ################ js/ui.js ################ */
 /* =====================================================================
    VZHLED: kalendář, editor dne, karty odpočinku, hodiny a fond
    render() překreslí všechno; volá se po každé změně.
@@ -920,9 +974,11 @@ function renderCalendar(A, dm, wm) {
     const w = es.find(x => x.t === 'work' && dm[x.id]);
     const cls = ['d', d.getMonth() !== m && 'o', d.getDay() % 6 === 0 && 'we', k === today && 't', k === sel && 's', wm[k] && 'k-' + wm[k]].filter(Boolean).join(' ');
     const dot = w ? `<u class="x-${dm[w.id].c}"></u>` : '';
-    const tag = DT[k] === 'ho' ? '<span class="tag ho">HO</span>' : DT[k] === 'off' ? '<span class="tag vo">volno</span>' : '';
+    const hn = holidayName(k), g0 = d.getDay();
+    const tag = DT[k] === 'ho' ? '<span class="tag ho">HO</span>' : DT[k] === 'off' ? '<span class="tag vo">volno</span>' : (hn && g0 > 0 && g0 < 6) ? `<span class="tag vo" title="${esc(hn)}">svátek</span>` : '';
+    const ni = NOTES[k] ? `<span class="ni" title="${esc(NOTES[k])}">✎</span>` : '';
     const chips = es.map(x => `<span class="chip ${x.t === 'call' ? 'c' : 'w'}">${x.t === 'call' ? '🚨' : ''}${shortTime(x.s)}–${shortTime(x.e)}</span>`).join('');
-    html += `<div class="${cls}" onclick="pickDay('${k}')"><i>${d.getDate()}</i>${dot}<div class="mk">${tag}${chips}</div></div>`;
+    html += `<div class="${cls}" onclick="pickDay('${k}')"><i>${d.getDate()}</i>${dot}${ni}<div class="mk">${tag}${chips}</div></div>`;
   }
   $('cal').innerHTML = html;
 }
@@ -970,11 +1026,15 @@ function renderEditor(A, dm, lastId) {
   // typ dne
   h += `<div class="seg">${[['work', 'Práce'], ['ho', 'HO'], ['off', 'Volno']].map(([v, l]) => `<button class="${type === v ? '' : 'g'}" onclick="setDayType('${v}')">${l}</button>`).join('')}</div>`;
   if (type === 'ho') h += `<div class="mut note">HO se počítá jako pracovní den: +${fmtH(prof.fund / 5)} do hodin (pokud nezadáš vlastní směnu).</div>`;
+  { const hn = holidayName(sel), g1 = dayStart(sel).getDay(); if (hn && !type && g1 > 0 && g1 < 6) h += `<div class="mut note">Státní svátek: <b>${esc(hn)}</b> – započte se jako odpracovaný den (+${fmtH(prof.fund / 5)}).</div>`; }
   if (type === 'off') h += `<div class="mut note">Volno se započte jako odpracovaný den (+${fmtH(prof.fund / 5)}), fond zůstává celý (platí Po–Pá).</div>`;
 
   // záznamy dne + stav odpočinku
   h += es.map(entryHtml).join('') || '<div class="mut note">Zatím nic. Vyber směnu nebo zásah níže.</div>';
   h += es.filter(x => dm[x.id] && !(DESK.matches && x.id === lastId)).map(x => { const r = dm[x.id]; return `<div class="badge ${r.c}">Odpočinek před směnou: <b>${fmtH(r.mx)}</b> – ${r.msg}</div>`; }).join('');
+
+  // poznámka ke dni
+  h += `<div class="sec">Poznámka</div><textarea id="nt" class="nt" maxlength="300" rows="2" placeholder="Např. školení, výměna směny…" onchange="setNote(this.value)">${esc(NOTES[sel] || '')}</textarea>`;
 
   // přidat směnu
   h += `<div class="sec">Přidat směnu</div><div class="pills">${CONFIG.shiftPresets.map(p => { const [a, z] = p.split('-'); return `<button class="g pill" onclick="addShift('${a}','${z}')">${a.replace(/^0/, '')}–${z.replace(/^0/, '')}</button>`; }).join('')}<button class="g pill" onclick="addShift()">jiná</button></div>`;
@@ -1109,7 +1169,8 @@ function setBalance(v) {
   const min = parseBalance(v); if (min === null) { render(); return; }
   BAL[monthKey(cur)] = min; save(); render();
 }
-function useAutoBalance() { const s = monthStats(); BAL[s.key] = Math.round(s.prevDiff / MIN); save(); render(); }
+function useAutoBalance() { delete BAL[monthKey(cur)]; save(); render(); }
+function setNote(v) { v = v.trim().slice(0, 300); if (v) NOTES[sel] = v; else delete NOTES[sel]; save(); render(); }
 
 function weeksHtml() {
   const rows = weekRows().filter(x => !x.future).map(x => {
@@ -1124,7 +1185,9 @@ function renderSummary() {
   const label = cur.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
   const asOf = s.asOf ? fmtDate(s.asOf) : '—';
   const row = (name, val, cls = '') => `<div class="sr ${cls}"><span>${name}</span><b>${val}</b></div>`;
-  const hint = s.prevHas ? `<div class="mut hint">Dle záznamů minulý měsíc: <b>${signedMs(s.prevDiff)}</b> <button class="lnk" onclick="useAutoBalance()">použít</button></div>` : '';
+  const hint = s.balExplicit
+    ? (s.autoBal !== null && s.autoBal * MIN !== s.bal ? `<div class="mut hint">Automaticky z min. měsíce: <b>${signedMs(s.autoBal * MIN)}</b> <button class="lnk" onclick="useAutoBalance()">použít</button></div>` : '')
+    : (s.autoBal !== null ? `<div class="mut hint">Zůstatek přenesen automaticky z minulého měsíce (přepiš ručně, když nesedí).</div>` : '');
   $('sm').innerHTML = `<div class="card"><div class="tt">Hodiny a fond · ${label}</div>
     <div class="mut asof">Stav k poslednímu celému dni: <b>${asOf}</b> (dnešek se nepočítá)</div>
     ${row('Směny', fmtMs(s.sh))}
@@ -1134,11 +1197,10 @@ function renderSummary() {
     <div class="sr"><span>Zůstatek z min. měsíce <small class="mut">(k ${fmtDate(s.balDate)})</small></span><input class="bal" value="${balText(s.bal / MIN)}" onchange="setBalance(this.value)" onfocus="this.select()" aria-label="Zůstatek z minulého měsíce"></div>${hint}
     ${row('Celkem se zůstatkem k ' + asOf, signedMs(s.total), 'total ' + (s.total < 0 ? 'neg' : 'pos'))}
     ${row('Doba zásahů (zvlášť)', fmtMs(s.ca))}
-    <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · Volno: ${s.off} d · HO: ${s.ho} d</div>
+    <div class="mut line">Fond za celý měsíc: ${fmtMs(s.fundFull)} · Volno: ${s.off - s.hol} d · Svátky: ${s.hol} d · HO: ${s.ho} d</div>
     ${weeksHtml()}</div>`;
 }
 
-/* ################ js/pdf.js ################ */
 /* =====================================================================
    EXPORT DO PDF (A4, zobrazený měsíc)
    Stránky se skládají jako HTML, vyfotí se (html2canvas) a vloží do PDF (jsPDF).
@@ -1187,7 +1249,9 @@ async function exportPdf() {
     const byDay = {};
     A.S.forEach(x => { const d = new Date(x.s); if (d.getFullYear() === y && d.getMonth() === m) (byDay[key(x.s)] = byDay[key(x.s)] || []).push(x); });
     const prefix = y + '-' + pad(m + 1) + '-';
-    const dayKeys = [...new Set([...Object.keys(byDay), ...Object.keys(DT).filter(k => k.startsWith(prefix))])].filter(counted).sort();
+    const hols = []; for (let dd = 1; dd <= new Date(y, m + 1, 0).getDate(); dd++) { const kk = prefix + pad(dd), g = dayStart(kk).getDay(); if (g > 0 && g < 6 && holidayName(kk)) hols.push(kk); }
+    const hasNotes = Object.keys(NOTES).some(k => k.startsWith(prefix) && counted(k));
+    const dayKeys = [...new Set([...Object.keys(byDay), ...Object.keys(DT).filter(k => k.startsWith(prefix)), ...hols, ...Object.keys(NOTES).filter(k => k.startsWith(prefix))])].filter(counted).sort();
 
     const TH = `padding:7px 8px;background:${GREEN};color:#fff;font-size:11px;font-weight:700;`;
     const TD = 'padding:7px 8px;border-bottom:1px solid #dfe7e2;vertical-align:middle;white-space:nowrap;';
@@ -1195,14 +1259,15 @@ async function exportPdf() {
       const es = byDay[k] || [], type = DT[k];
       const works = es.filter(x => x.t === 'work'), calls = es.filter(x => x.t === 'call');
       const rest = works.map(x => dm[x.id]).filter(Boolean)[0];
-      const sh = works.reduce((a, x) => a + netMs(x), 0) + ((type === 'ho' || (type === 'off' && dayStart(k).getDay() % 6 !== 0)) && !works.length ? prof.fund / 5 * H : 0);
+      const isHol = !type && !works.length && hols.includes(k);
+      const sh = works.reduce((a, x) => a + netMs(x), 0) + ((type === 'ho' || isHol || (type === 'off' && dayStart(k).getDay() % 6 !== 0)) && !works.length ? prof.fund / 5 * H : 0);
       const ch = calls.reduce((a, x) => a + x.e - x.s, 0);
       const restColor = rest ? (rest.c === 'ok' ? GREEN : rest.c === 'wa' ? '#b26a00' : '#c62828') : '#1b2620';
-      const shiftText = type === 'off' && !works.length ? 'Volno' : type === 'ho' && !works.length ? 'HO' : works.map(x => hm(x.s) + '–' + hm(x.e)).join(', ') || '–';
+      const shiftText = type === 'off' && !works.length ? 'Volno' : isHol ? 'Svátek' : type === 'ho' && !works.length ? 'HO' : works.map(x => hm(x.s) + '–' + hm(x.e)).join(', ') || '–';
       return `<tr><td style="${TD}font-weight:700">${dayStart(k).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' })}</td>
         <td style="${TD}">${shiftText}</td><td style="${TD}text-align:right">${sh ? fmtMs(sh) : ''}</td>
         <td style="${TD}white-space:normal;font-size:11px">${calls.map(x => hm(x.s) + '–' + hm(x.e)).join(', ') || '–'}</td><td style="${TD}text-align:right">${ch ? fmtMs(ch) : ''}</td>
-        <td style="${TD}color:${restColor};font-weight:600">${rest ? fmtMs(rest.mx * H) + ' · ' + rest.msg.split(' (')[0] : ''}</td></tr>`;
+        <td style="${TD}color:${restColor};font-weight:600">${rest ? fmtMs(rest.mx * H) + ' · ' + rest.msg.split(' (')[0] : ''}</td></tr>` + (NOTES[k] ? `<tr><td colspan="6" style="${TD}white-space:normal;font-size:10.5px;color:#4a5a52;padding-top:2px">Poznámka: ${esc(NOTES[k])}</td></tr>` : '');
     });
 
     const tableHead = `<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:13%"><col style="width:17%"><col style="width:14%"><col style="width:21%"><col style="width:14%"><col style="width:21%"></colgroup>
@@ -1218,7 +1283,7 @@ async function exportPdf() {
       <div style="display:flex;justify-content:space-between;margin-top:54px"><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis zaměstnance</div><div style="border-top:1px solid #6b7a71;width:42%;padding-top:5px;color:#5f6f66">Podpis nadřízeného</div></div>`;
 
     /* rozdělení na stránky: 19 řádků na první, 27 na další; shrnutí na poslední (nebo vlastní) stránku */
-    const FIRST = 19, NEXT = 27, chunks = [rows.slice(0, FIRST)];
+    const FIRST = hasNotes ? 16 : 19, NEXT = hasNotes ? 22 : 27, chunks = [rows.slice(0, FIRST)];
     for (let i = FIRST; i < rows.length; i += NEXT) chunks.push(rows.slice(i, i + NEXT));
     const lastCap = chunks.length === 1 ? FIRST : NEXT, summaryFits = chunks[chunks.length - 1].length <= lastCap - 11;
     const pages = chunks.map((c, n) => ({ body: tableHead + c.join('') + (n === chunks.length - 1 ? totalRow : '') + '</table>', summary: summaryFits && n === chunks.length - 1 }));
@@ -1243,12 +1308,11 @@ async function exportPdf() {
   finally { btn.textContent = oldLabel; $('rep').innerHTML = ''; }
 }
 
-/* ################ js/main.js ################ */
 /* =====================================================================
    SPUŠTĚNÍ A DROBNOSTI (téma, profil, klávesa Delete)
    ===================================================================== */
 const localData = readLocal();      // data z tohoto zařízení (použijí se jen bez Supabase / pro nabídku přenosu)
-if (!CLOUD) { D = localData.D; DT = localData.DT; prof = localData.prof; BAL = localData.BAL; }
+if (!CLOUD) { D = localData.D; DT = localData.DT; prof = localData.prof; BAL = localData.BAL; NOTES = localData.NOTES; }
 
 /* --- světlý / tmavý režim --- */
 function applyTheme(t) {
@@ -1285,6 +1349,7 @@ if (DESK.matches) sel = todayKey();                       // na PC je dnešek ro
 DESK.addEventListener('change', () => { if (DESK.matches && !sel) sel = todayKey(); render(); });
 
 if (CLOUD) initCloud(); else render();
+
 </script>
 </body>
 </html>
