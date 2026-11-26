@@ -528,7 +528,7 @@ function analyze(list) {
    - směna = délka mínus pauza na oběd (config.js)
    - zásahy se počítají zvlášť, celé
    - HO = pracovní den: přičte se denní norma (týdenní fond / 5), pokud není zadaná směna
-   - Volno = den se odečte z fondu (jen Po–Pá)
+   - Volno = započítá se jako odpracovaný den (norma), fond zůstává celý (jen Po–Pá)
    - Dny, které ještě nebyly, se nepočítají (CONFIG.countFutureDays)
    ===================================================================== */
 
@@ -564,7 +564,8 @@ function calcRange(from, to, cut = true) {
     if (DT[k] === 'off' && weekday) off++;
     if (DT[k] === 'ho' && !day.work) { ho++; sh += norm; }
   }
-  return { sh, ca, wd, off, ho, days: wd - off, fund: (wd - off) * norm };
+  // fond = všechny pracovní dny × denní norma; volno se nesnižuje fond, ale ZAPOČTE se jako odpracovaný den (lv)
+  return { sh, ca, wd, off, ho, days: wd, fund: wd * norm, lv: off * norm, diff: sh + off * norm - wd * norm };
 }
 
 const monthKey = d => d.getFullYear() + '-' + pad(d.getMonth() + 1);
@@ -581,9 +582,9 @@ function monthStats() {
   r.balDate = new Date(y, m, 0);                     // zůstatek z min. měsíce platí k poslednímu dni min. měsíce
   r.key = monthKey(a);
   r.bal = (BAL[r.key] || 0) * MIN;                 // zůstatek z minulého měsíce
-  r.total = r.sh - r.fund + r.bal;                 // rozdíl za měsíc + zůstatek
+  r.total = r.diff + r.bal;                 // rozdíl za měsíc + zůstatek
   const p = calcRange(new Date(y, m - 1, 1), new Date(y, m, 0));   // minulý měsíc podle záznamů (pro srovnání)
-  r.prevDiff = p.sh - p.fund;
+  r.prevDiff = p.diff;
   r.prevHas = p.sh > 0 || p.ca > 0 || p.ho > 0;
   return r;
 }
@@ -848,7 +849,7 @@ function renderEditor(A, dm, lastId) {
   // typ dne
   h += `<div class="seg">${[['work', 'Práce'], ['ho', 'HO'], ['off', 'Volno']].map(([v, l]) => `<button class="${type === v ? '' : 'g'}" onclick="setDayType('${v}')">${l}</button>`).join('')}</div>`;
   if (type === 'ho') h += `<div class="mut note">HO se počítá jako pracovní den: +${fmtH(prof.fund / 5)} do hodin (pokud nezadáš vlastní směnu).</div>`;
-  if (type === 'off') h += `<div class="mut note">Volno se odečte z fondu (platí Po–Pá).</div>`;
+  if (type === 'off') h += `<div class="mut note">Volno se započte jako odpracovaný den (+${fmtH(prof.fund / 5)}), fond zůstává celý (platí Po–Pá).</div>`;
 
   // záznamy dne + stav odpočinku
   h += es.map(entryHtml).join('') || '<div class="mut note">Zatím nic. Vyber směnu nebo zásah níže.</div>';
@@ -971,14 +972,17 @@ function renderStatus(A) {
 /* ---------- 4) HODINY A FOND ---------- */
 const balText = min => { const a = Math.abs(Math.round(min)); return (min < 0 ? '−' : min > 0 ? '+' : '') + Math.floor(a / 60) + ':' + pad(a % 60); };
 
-// "-1:30", "+2", "1,5" (hodiny), "0:45" → minuty (nebo null)
+// Zápis zůstatku → minuty (nebo null, když je špatně):
+//   "-1:30" = −1 h 30 min   "1,40" nebo "1.40" = 1 h 40 min (dvě číslice = minuty)
+//   "1,5" = 1,5 h (jedna číslice = desetiny hodiny)   "2" = 2 h   "+0:45"
 function parseBalance(v) {
-  v = String(v || '').trim().replace('−', '-').replace(/\s/g, '');
+  v = String(v || '').trim().replace('−', '-').replace(/\s/g, '').replace(/h$/i, '');
   if (v === '') return 0;
-  const m = v.match(/^([+-])?(\d+)(?:[:.,](\d+))?$/); if (!m) return null;
-  const sign = m[1] === '-' ? -1 : 1;
-  if (v.includes(':')) return sign * (+m[2] * 60 + (+m[3] || 0));
-  return sign * Math.round(parseFloat(m[2] + '.' + (m[3] || '0')) * 60);       // desetinné hodiny
+  const m = v.match(/^([+-])?(\d+)(?:([:.,])(\d+))?$/); if (!m) return null;
+  const sign = m[1] === '-' ? -1 : 1, h = +m[2], sep = m[3], f = m[4] || '';
+  if (!sep) return sign * h * 60;
+  if (sep === ':' || f.length === 2) { const mm = +f; return mm > 59 ? null : sign * (h * 60 + mm); }
+  return sign * Math.round(parseFloat(h + '.' + f) * 60);        // 1,5 → 90 min
 }
 function setBalance(v) {
   const min = parseBalance(v); if (min === null) { render(); return; }
@@ -988,14 +992,14 @@ function useAutoBalance() { const s = monthStats(); BAL[s.key] = Math.round(s.pr
 
 function weeksHtml() {
   const rows = weekRows().filter(x => !x.future).map(x => {
-    const d = x.sh - x.fund;
-    return `<tr><td><b>KV ${isoWeek(x.w)}</b> <span class="mut">${fmtDate(x.w)}</span></td><td>${fmtMs(x.sh)}</td><td>${fmtMs(x.ca)}</td><td>${fmtMs(x.fund)}</td><td class="${d < 0 ? 'neg' : 'pos'}">${signedMs(d)}</td></tr>`;
+    const d = x.diff;
+    return `<tr><td><b>KV ${isoWeek(x.w)}</b> <span class="mut">${fmtDate(x.w)}</span></td><td>${fmtMs(x.sh + x.lv)}</td><td>${fmtMs(x.ca)}</td><td>${fmtMs(x.fund)}</td><td class="${d < 0 ? 'neg' : 'pos'}">${signedMs(d)}</td></tr>`;
   }).join('');
   return `<table class="wt"><tr><th>KV</th><th>Směny</th><th>Zásahy</th><th>Fond</th><th>±</th></tr>${rows}</table>`;
 }
 
 function renderSummary() {
-  const s = monthStats(), diff = s.sh - s.fund;
+  const s = monthStats(), diff = s.diff;
   const label = cur.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
   const asOf = s.asOf ? fmtDate(s.asOf) : '—';
   const row = (name, val, cls = '') => `<div class="sr ${cls}"><span>${name}</span><b>${val}</b></div>`;
@@ -1003,6 +1007,7 @@ function renderSummary() {
   $('sm').innerHTML = `<div class="card"><div class="tt">Hodiny a fond · ${label}</div>
     <div class="mut asof">Stav k poslednímu celému dni: <b>${asOf}</b> (dnešek se nepočítá)</div>
     ${row('Směny', fmtMs(s.sh))}
+    ${s.off ? row('Volno / svátky (započteno)', '+' + fmtMs(s.lv)) : ''}
     ${row('Fond k ' + asOf + ' (' + s.days + ' dní)', fmtMs(s.fund))}
     ${row('Rozdíl za měsíc k ' + asOf, signedMs(diff), diff < 0 ? 'neg' : 'pos')}
     <div class="sr"><span>Zůstatek z min. měsíce <small class="mut">(k ${fmtDate(s.balDate)})</small></span><input class="bal" value="${balText(s.bal / MIN)}" onchange="setBalance(this.value)" onfocus="this.select()" aria-label="Zůstatek z minulého měsíce"></div>${hint}
@@ -1039,10 +1044,10 @@ function pdfWeeksTable() {
   const th = `padding:6px 8px;background:${GREEN};color:#fff;font-size:11px;text-align:right`;
   const td = 'padding:6px 8px;border-bottom:1px solid #dfe7e2;text-align:right';
   const rows = weekRows().filter(x => !x.future).map(x => {
-    const d = x.sh - x.fund;
+    const d = x.diff;
     const label = `<td style="${td};text-align:left"><b>KV ${isoWeek(x.w)}</b> <span style="color:#5f6f66;font-size:10px">(${fmtDate(x.w)})</span></td>`;
     if (x.future) return `<tr>${label}<td style="${td};color:#5f6f66" colspan="4">ještě nebylo</td></tr>`;
-    return `<tr>${label}<td style="${td}">${fmtMs(x.sh)}</td><td style="${td}">${fmtMs(x.ca)}</td><td style="${td}">${fmtMs(x.fund)}</td><td style="${td};font-weight:700;color:${d < 0 ? '#c62828' : GREEN}">${signedMs(d)}</td></tr>`;
+    return `<tr>${label}<td style="${td}">${fmtMs(x.sh + x.lv)}</td><td style="${td}">${fmtMs(x.ca)}</td><td style="${td}">${fmtMs(x.fund)}</td><td style="${td};font-weight:700;color:${d < 0 ? '#c62828' : GREEN}">${signedMs(d)}</td></tr>`;
   }).join('');
   return `<table style="width:100%;border-collapse:collapse;font-size:12px"><tr><th style="${th};text-align:left">KV</th><th style="${th}">Směny</th><th style="${th}">Zásahy</th><th style="${th}">Fond</th><th style="${th}">Rozdíl</th></tr>${rows}</table>`;
 }
@@ -1069,7 +1074,7 @@ async function exportPdf() {
       const es = byDay[k] || [], type = DT[k];
       const works = es.filter(x => x.t === 'work'), calls = es.filter(x => x.t === 'call');
       const rest = works.map(x => dm[x.id]).filter(Boolean)[0];
-      const sh = works.reduce((a, x) => a + netMs(x), 0) + (type === 'ho' && !works.length ? prof.fund / 5 * H : 0);
+      const sh = works.reduce((a, x) => a + netMs(x), 0) + ((type === 'ho' || (type === 'off' && dayStart(k).getDay() % 6 !== 0)) && !works.length ? prof.fund / 5 * H : 0);
       const ch = calls.reduce((a, x) => a + x.e - x.s, 0);
       const restColor = rest ? (rest.c === 'ok' ? GREEN : rest.c === 'wa' ? '#b26a00' : '#c62828') : '#1b2620';
       const shiftText = type === 'off' && !works.length ? 'Volno' : type === 'ho' && !works.length ? 'HO' : works.map(x => hm(x.s) + '–' + hm(x.e)).join(', ') || '–';
@@ -1081,10 +1086,10 @@ async function exportPdf() {
 
     const tableHead = `<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:13%"><col style="width:17%"><col style="width:14%"><col style="width:21%"><col style="width:14%"><col style="width:21%"></colgroup>
       <tr><th style="${TH}text-align:left">Datum</th><th style="${TH}text-align:left">Směna</th><th style="${TH}text-align:right">Doba směny</th><th style="${TH}text-align:left">Zásah</th><th style="${TH}text-align:right">Doba zásahů</th><th style="${TH}text-align:left">Odpočinek před směnou</th></tr>`;
-    const totalRow = `<tr style="background:#eef5f0;font-weight:700"><td style="${TD}">Celkem</td><td style="${TD}"></td><td style="${TD}text-align:right">${fmtMs(s.sh)}</td><td style="${TD}"></td><td style="${TD}text-align:right">${fmtMs(s.ca)}</td><td style="${TD}"></td></tr>`;
+    const totalRow = `<tr style="background:#eef5f0;font-weight:700"><td style="${TD}">Celkem</td><td style="${TD}"></td><td style="${TD}text-align:right">${fmtMs(s.sh + s.lv)}</td><td style="${TD}"></td><td style="${TD}text-align:right">${fmtMs(s.ca)}</td><td style="${TD}"></td></tr>`;
 
     /* shrnutí, týdny, podpisy */
-    const tiles = [['Směny', fmtMs(s.sh)], ['Doba zásahů', fmtMs(s.ca)], ['Fond k ' + asOf + ' (' + s.days + ' dní)', fmtMs(s.fund)], ['Směny − fond k ' + asOf, signedMs(s.sh - s.fund)]];
+    const tiles = [['Směny' + (s.off ? ' (vč. volna)' : ''), fmtMs(s.sh + s.lv)], ['Doba zásahů', fmtMs(s.ca)], ['Fond k ' + asOf + ' (' + s.days + ' dní)', fmtMs(s.fund)], ['Směny − fond k ' + asOf, signedMs(s.diff)]];
     const summary = `<div style="margin-top:18px;display:flex;gap:10px">${tiles.map(q => `<div style="flex:1;border:1px solid #dfe7e2;border-top:3px solid ${GREEN};border-radius:6px;padding:8px 10px"><div style="font-size:10px;color:#5f6f66">${q[0]}</div><div style="font-size:16px;font-weight:700;color:#006b30">${q[1]}</div></div>`).join('')}</div>
       <div style="margin-top:8px;font-size:12px"><b>Zůstatek z min. měsíce (k ${fmtDate(s.balDate)}):</b> ${balText(s.bal / MIN)} &nbsp;|&nbsp; <b>Celkem se zůstatkem k ${asOf}:</b> ${signedMs(s.total)}</div>
       <div style="font-size:10px;color:#5f6f66;margin-top:6px">Fond za celý měsíc: ${fmtMs(s.fundFull)}${s.off ? ' · volno/svátky: ' + s.off + ' d' : ''}${s.ho ? ' · HO: ' + s.ho + ' d' : ''}. Doba směny je po odečtení pauzy na oběd (${CONFIG.lunchMin} min u směn nad ${CONFIG.lunchFromHours} h).</div>
