@@ -172,6 +172,7 @@ header { display:flex; justify-content:space-between; align-items:center; flex-w
 .lbox h2 { margin:0 0 4px; font-size:20px; color:var(--ac-tx); } .lbox p { margin:0 0 10px; }
 .lbox input { width:100%; margin:6px 0; padding:11px; font:inherit; color:var(--tx); background:var(--cell); border:1px solid var(--bd); border-radius:10px; }
 .lbox button { width:100%; margin-top:6px; }
+button.lnk2 { background:none; color:var(--ac-tx); border:0; font-weight:500; font-size:13px; text-decoration:underline; margin-top:10px; }
 #toast { display:none; position:fixed; left:50%; transform:translateX(-50%); bottom:calc(16px + env(safe-area-inset-bottom,0px)); z-index:90;
   max-width:min(560px,92vw); padding:12px 16px; background:#3c4350; color:#fff; border-radius:12px; font-size:14px; box-shadow:0 6px 20px rgba(0,0,0,.3); }
 #rep { position:fixed; left:0; top:0; z-index:-1; pointer-events:none; }
@@ -278,10 +279,30 @@ button.lnk { background:none; border:0; padding:0 0 0 6px; color:var(--ac-tx); f
 
 <!-- ===== PŘIHLÁŠENÍ (zobrazí se jen s Supabase) ===== -->
 <div id="login" hidden><div class="lbox">
-  <h2>Schaeffler motion technologies</h2><p class="mut">Docházka – přihlášení e-mailem</p>
-  <input id="lem" type="email" autocomplete="email" placeholder="tvůj e-mail">
-  <button onclick="sendCode()">Poslat přihlašovací kód</button>
-  <div id="lcode" hidden><input id="lcd" inputmode="numeric" autocomplete="one-time-code" placeholder="kód z e-mailu"><button onclick="verifyCode()">Přihlásit</button></div>
+  <h2>Schaeffler motion technologies</h2>
+  <!-- 1) běžné přihlášení: e-mail + heslo -->
+  <div id="lv-login">
+    <p class="mut">Docházka – přihlášení</p>
+    <input id="lem1" type="email" autocomplete="username" placeholder="e-mail">
+    <input id="lpw" type="password" autocomplete="current-password" placeholder="heslo" onkeydown="if(event.key==='Enter')signInPw()">
+    <button onclick="signInPw()">Přihlásit</button>
+    <button class="lnk2" onclick="showLogin('code')">První přihlášení nebo zapomenuté heslo</button>
+  </div>
+  <!-- 2) první přihlášení / zapomenuté heslo: kód z e-mailu -->
+  <div id="lv-code" hidden>
+    <p class="mut">Pošleme ti kód na e-mail. Po jeho zadání si nastavíš nové heslo.</p>
+    <input id="lem" type="email" autocomplete="email" placeholder="tvůj e-mail">
+    <button onclick="sendCode()">Poslat kód</button>
+    <div id="lcode" hidden><input id="lcd" inputmode="numeric" autocomplete="one-time-code" placeholder="kód z e-mailu"><button onclick="verifyCode()">Pokračovat</button></div>
+    <button class="lnk2" onclick="showLogin('login')">← Zpět na přihlášení heslem</button>
+  </div>
+  <!-- 3) nastavení hesla -->
+  <div id="lv-setpw" hidden>
+    <p class="mut">Nastav si heslo pro další přihlášení (min. 8 znaků).</p>
+    <input id="np1" type="password" autocomplete="new-password" placeholder="nové heslo">
+    <input id="np2" type="password" autocomplete="new-password" placeholder="nové heslo znovu" onkeydown="if(event.key==='Enter')setPassword()">
+    <button onclick="setPassword()">Uložit heslo a vstoupit</button>
+  </div>
   <div id="lmsg" class="mut" style="margin-top:10px"></div>
 </div></div>
 
@@ -584,6 +605,7 @@ function weekRows() {
    Bez vyplněných klíčů v config.js se nic z toho nepoužije (lokální režim).
    ===================================================================== */
 const CLOUD = /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(CONFIG.supabaseUrl) && !/YOUR/.test(CONFIG.supabaseKey);
+let pendingUser = null;   // přihlášený, ale ještě bez hesla
 let sb = null, user = null, syncTimer = null, syncing = false;
 let snap = { d: {}, t: {}, p: '', b: '' };   // co už je v databázi (pro zjištění změn)
 
@@ -650,6 +672,9 @@ async function loadCloud() {
 /* --- vstup uživatele do aplikace --- */
 async function enter(u) {
   if (user && user.id === u.id) return;
+  // bez nastaveného hesla (nebo po „zapomenuté heslo“) se nejdřív nastaví heslo
+  let force = false; try { force = localStorage.getItem('dochazka_force_pw') === '1'; } catch (e) {}
+  if (force || !(u.user_metadata && u.user_metadata.has_password)) { pendingUser = u; showLogin('setpw'); return; }
   user = u;
   try {
     await loadCloud();
@@ -669,29 +694,62 @@ async function enter(u) {
 
 async function initCloud() {
   sb = supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
-  $('login').hidden = false;
+  showLogin('login');
   const r = await sb.auth.getSession();
   if (r.data && r.data.session) await enter(r.data.session.user);
   sb.auth.onAuthStateChange((ev, sess) => {
     if (ev === 'SIGNED_OUT') {          // odhlášení: smazat data z paměti
       user = null; D = []; DT = {}; BAL = {}; prof = { name: '', fund: CONFIG.defaultWeeklyFund };
-      $('who').textContent = ''; $('lo').hidden = true; $('login').hidden = false;
+      $('who').textContent = ''; $('lo').hidden = true; pendingUser = null; showLogin('login');
     } else if (ev === 'SIGNED_IN' && sess) setTimeout(() => enter(sess.user), 0);
   });
 }
 
-/* --- přihlašovací okno --- */
+/* --- přihlašovací okno: 3 pohledy (login / code / setpw) --- */
+function showLogin(view) {
+  ['login', 'code', 'setpw'].forEach(v => $('lv-' + v).hidden = v !== view);
+  $('login').hidden = false; $('lmsg').textContent = '';
+  if (view === 'code' && !$('lem').value) $('lem').value = $('lem1').value;
+}
+
+// běžné přihlášení heslem
+async function signInPw() {
+  const email = $('lem1').value.trim(), password = $('lpw').value;
+  if (!email || !password) { $('lmsg').textContent = 'Vyplň e-mail a heslo.'; return; }
+  $('lmsg').textContent = 'Přihlašuji…';
+  const r = await sb.auth.signInWithPassword({ email, password });
+  if (r.error) $('lmsg').textContent = 'Špatný e-mail nebo heslo. Nemáš heslo nebo jsi ho zapomněl? Použij odkaz níže.';
+  else $('lpw').value = '';
+}
+
+// první přihlášení / zapomenuté heslo: pošle kód na e-mail
 async function sendCode() {
   const email = $('lem').value.trim(); if (!email) return;
   $('lmsg').textContent = 'Odesílám…';
   const r = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split('#')[0].split('?')[0] } });
   if (r.error) { $('lmsg').textContent = 'Chyba: ' + r.error.message; return; }
+  try { localStorage.setItem('dochazka_force_pw', '1'); } catch (e) {}   // po ověření se musí nastavit heslo
   $('lcode').hidden = false;
   $('lmsg').textContent = 'Kód byl odeslán na ' + email + '. Zadej ho níže (nebo klikni na odkaz v e-mailu).';
 }
 async function verifyCode() {
   const r = await sb.auth.verifyOtp({ email: $('lem').value.trim(), token: $('lcd').value.trim(), type: 'email' });
   if (r.error) $('lmsg').textContent = 'Chyba: ' + r.error.message;
+  // při úspěchu se spustí onAuthStateChange → enter() → nabídne nastavení hesla
+}
+
+// nastavení hesla
+async function setPassword() {
+  const a = $('np1').value, b = $('np2').value;
+  if (a.length < 8) { $('lmsg').textContent = 'Heslo musí mít aspoň 8 znaků.'; return; }
+  if (a !== b) { $('lmsg').textContent = 'Hesla se neshodují.'; return; }
+  $('lmsg').textContent = 'Ukládám…';
+  const r = await sb.auth.updateUser({ password: a, data: { has_password: true } });
+  if (r.error) { $('lmsg').textContent = 'Chyba: ' + r.error.message; return; }
+  try { localStorage.removeItem('dochazka_force_pw'); } catch (e) {}
+  $('np1').value = $('np2').value = '';
+  const u = pendingUser; pendingUser = null;
+  await enter(r.data.user || u);
 }
 
 /* ################ js/ui.js ################ */
